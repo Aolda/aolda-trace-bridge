@@ -1,0 +1,7 @@
+.git
+docs
+testdata
+**/*_test.go
+osprofiler-tempo-bridge
+__pycache__/
+*.pyc

@@ -1,0 +1,24 @@
+osprofiler:
+  connection_string: "${OSPROFILER_CONNECTION_STRING}"
+
+helper:
+  command:
+    - "python3"
+    - "/app/helper/osprofiler_helper.py"
+  request_timeout: "10s"
+  startup_timeout: "5s"
+
+otlp:
+  endpoint: "${OTLP_ENDPOINT}"
+  timeout: "5s"
+
+bridge:
+  service_name: "osprofiler-bridge"
+  redact_db_params: true
+  redact_db_statement: false
+  redact_sensitive_keys: true
+
+metrics:
+  listen_addr: ":9090"
+  path: "/metrics"
+
