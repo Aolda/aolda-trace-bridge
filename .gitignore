@@ -1,4 +1,4 @@
-osprofiler-tempo-bridge
+/osprofiler-tempo-bridge
 .env
 .env.*
 *.log
