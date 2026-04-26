@@ -49,6 +49,9 @@ jobs:
       - name: Check Python helper syntax
         run: python3 -m py_compile helper/osprofiler_helper.py
 
+      - name: Run Python helper tests
+        run: python3 -m unittest discover -s helper -p '*_test.py'
+
   image:
     name: Build and Publish Image
     runs-on: ubuntu-latest

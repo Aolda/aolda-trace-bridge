@@ -94,6 +94,7 @@ def _handle(request):
         return _response_ok(request_id, deleted=deleted)
 
     try:
+        _reset_report_state(engine)
         report = engine.get_report(base_id)
     except Exception as exc:
         _print_exception("get_report failed")
@@ -103,6 +104,21 @@ def _handle(request):
         return _response_error(request_id, "trace_not_found", "trace not found")
 
     return _response_ok(request_id, report=report)
+
+
+def _reset_report_state(engine):
+    # OSProfiler's Redis driver mutates these fields while building a report
+    # and does not reset them between get_report() calls. A long-running helper
+    # must clear them before each report or old millisecond offsets can be mixed
+    # with new datetime values inside the driver.
+    if hasattr(engine, "result"):
+        engine.result = {}
+    if hasattr(engine, "started_at"):
+        engine.started_at = None
+    if hasattr(engine, "finished_at"):
+        engine.finished_at = None
+    if hasattr(engine, "last_started_at"):
+        engine.last_started_at = None
 
 
 def _delete_trace(engine, base_id):
