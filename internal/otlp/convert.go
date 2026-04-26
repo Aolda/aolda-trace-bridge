@@ -329,7 +329,8 @@ var (
 	sqlIntoRE       = regexp.MustCompile(`(?i)\bINTO\s+([A-Za-z_][A-Za-z0-9_.$]*)`)
 	sqlUpdateRE     = regexp.MustCompile(`(?i)\bUPDATE\s+([A-Za-z_][A-Za-z0-9_.$]*)`)
 	sqlOperationRE  = regexp.MustCompile(`(?i)^\s*([A-Z]+)\b`)
-	requestIDRE     = regexp.MustCompile(`\breq-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)
+	requestIDFullRE = regexp.MustCompile(`\breq-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)
+	requestIDBareRE = regexp.MustCompile(`\b[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)
 	identifierTrim  = strings.NewReplacer(`"`, "", "`", "", "[", "", "]", "")
 	whitespaceRunRE = regexp.MustCompile(`\s+`)
 )
@@ -454,6 +455,7 @@ func spanAttributes(baseID string, node report.Node, opts redaction.Options) []*
 	}
 	if requestID := firstOpenStackRequestID(node.Info); requestID != "" {
 		attrs = append(attrs, stringKV("openstack.request_id", requestID))
+		attrs = append(attrs, stringKV("openstack.request_id_prefixed", "req-"+requestID))
 	}
 
 	redacted := redaction.Redact(node.Info, opts)
@@ -468,41 +470,70 @@ func firstOpenStackRequestID(info map[string]any) string {
 	seen := map[string]bool{}
 	var found string
 
-	var walk func(any)
-	walk = func(value any) {
+	var walk func(any, string)
+	walk = func(value any, keyContext string) {
 		if found != "" {
 			return
 		}
 
 		switch typed := value.(type) {
 		case map[string]any:
-			for _, child := range typed {
-				walk(child)
+			for key, child := range typed {
+				walk(child, key)
 				if found != "" {
 					return
 				}
 			}
 		case []any:
 			for _, child := range typed {
-				walk(child)
+				walk(child, keyContext)
 				if found != "" {
 					return
 				}
 			}
 		case string:
-			for _, requestID := range requestIDRE.FindAllString(typed, -1) {
-				requestID = strings.ToLower(requestID)
-				if !seen[requestID] {
+			for _, requestID := range requestIDFullRE.FindAllString(typed, -1) {
+				requestID = normalizeOpenStackRequestID(requestID)
+				if requestID != "" && !seen[requestID] {
 					seen[requestID] = true
 					found = requestID
 					return
 				}
 			}
+			if isRequestIDKey(keyContext) {
+				for _, requestID := range requestIDBareRE.FindAllString(typed, -1) {
+					requestID = normalizeOpenStackRequestID(requestID)
+					if requestID != "" && !seen[requestID] {
+						seen[requestID] = true
+						found = requestID
+						return
+					}
+				}
+			}
 		}
 	}
 
-	walk(info)
+	walk(info, "")
 	return found
+}
+
+func isRequestIDKey(key string) bool {
+	key = strings.ToLower(strings.ReplaceAll(key, "-", "_"))
+	return key == "request_id" ||
+		key == "global_request_id" ||
+		key == "x_openstack_request_id" ||
+		key == "x_compute_request_id" ||
+		key == "x_openstack_nova_request_id" ||
+		strings.HasSuffix(key, "_request_id")
+}
+
+func normalizeOpenStackRequestID(value string) string {
+	value = strings.ToLower(strings.TrimSpace(value))
+	value = strings.TrimPrefix(value, "req-")
+	if !requestIDBareRE.MatchString(value) {
+		return ""
+	}
+	return value
 }
 
 func rootAttributes(baseID string, r report.Report, opts redaction.Options) []*commonpb.KeyValue {

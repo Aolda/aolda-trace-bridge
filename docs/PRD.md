@@ -260,7 +260,8 @@ osprofiler.info_json = redacted JSON string of node info
 osprofiler.base_id
 osprofiler.trace_id
 osprofiler.parent_id
-openstack.request_id = OpenStack request ID when present in OSProfiler payloads
+openstack.request_id = bare OpenStack request UUID when present in OSProfiler payloads
+openstack.request_id_prefixed = req-prefixed OpenStack request ID when present in OSProfiler payloads
 ```
 
 Later versions can promote additional selected fields into semantic attributes such as HTTP, DB, RPC, host, project, and service.
