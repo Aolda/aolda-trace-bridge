@@ -258,9 +258,10 @@ osprofiler.info_json = redacted JSON string of node info
 osprofiler.base_id
 osprofiler.trace_id
 osprofiler.parent_id
+openstack.request_id = OpenStack request ID when present in OSProfiler payloads
 ```
 
-Later versions can promote selected fields into semantic attributes such as HTTP, DB, RPC, host, project, and service.
+Later versions can promote additional selected fields into semantic attributes such as HTTP, DB, RPC, host, project, and service.
 
 ## Security Requirements
 

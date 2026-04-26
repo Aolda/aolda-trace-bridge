@@ -265,9 +265,12 @@ osprofiler.info_json
 osprofiler.base_id
 osprofiler.trace_id
 osprofiler.parent_id
+openstack.request_id
 ```
 
 `osprofiler.info_json` should contain a redacted JSON string of the node `info` object. Unknown OSProfiler fields should not be thrown away in MVP.
+
+`openstack.request_id` is promoted when a `req-...` OpenStack request ID is present anywhere in a span's OSProfiler payload. This lets Loki log lines containing only `request_id` be correlated back to Tempo by attribute search.
 
 Avoid high-cardinality metric labels such as raw path, SQL statement, base ID, trace ID, or full host+path combinations.
 

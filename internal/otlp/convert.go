@@ -326,6 +326,7 @@ var (
 	sqlIntoRE       = regexp.MustCompile(`(?i)\bINTO\s+([A-Za-z_][A-Za-z0-9_.$]*)`)
 	sqlUpdateRE     = regexp.MustCompile(`(?i)\bUPDATE\s+([A-Za-z_][A-Za-z0-9_.$]*)`)
 	sqlOperationRE  = regexp.MustCompile(`(?i)^\s*([A-Z]+)\b`)
+	requestIDRE     = regexp.MustCompile(`\breq-[0-9a-fA-F]{8}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{4}-[0-9a-fA-F]{12}\b`)
 	identifierTrim  = strings.NewReplacer(`"`, "", "`", "", "[", "", "]", "")
 	whitespaceRunRE = regexp.MustCompile(`\s+`)
 )
@@ -448,6 +449,9 @@ func spanAttributes(baseID string, node report.Node, opts redaction.Options) []*
 			attrs = append(attrs, stringKV("osprofiler."+key, value))
 		}
 	}
+	if requestID := firstOpenStackRequestID(node.Info); requestID != "" {
+		attrs = append(attrs, stringKV("openstack.request_id", requestID))
+	}
 
 	redacted := redaction.Redact(node.Info, opts)
 	data, err := json.Marshal(redacted)
@@ -455,6 +459,47 @@ func spanAttributes(baseID string, node report.Node, opts redaction.Options) []*
 		attrs = append(attrs, stringKV("osprofiler.info_json", string(data)))
 	}
 	return attrs
+}
+
+func firstOpenStackRequestID(info map[string]any) string {
+	seen := map[string]bool{}
+	var found string
+
+	var walk func(any)
+	walk = func(value any) {
+		if found != "" {
+			return
+		}
+
+		switch typed := value.(type) {
+		case map[string]any:
+			for _, child := range typed {
+				walk(child)
+				if found != "" {
+					return
+				}
+			}
+		case []any:
+			for _, child := range typed {
+				walk(child)
+				if found != "" {
+					return
+				}
+			}
+		case string:
+			for _, requestID := range requestIDRE.FindAllString(typed, -1) {
+				requestID = strings.ToLower(requestID)
+				if !seen[requestID] {
+					seen[requestID] = true
+					found = requestID
+					return
+				}
+			}
+		}
+	}
+
+	walk(info)
+	return found
 }
 
 func rootAttributes(baseID string, r report.Report, opts redaction.Options) []*commonpb.KeyValue {

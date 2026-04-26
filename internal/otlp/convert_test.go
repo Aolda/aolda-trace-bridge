@@ -172,6 +172,65 @@ func TestSQLStatementSummary(t *testing.T) {
 	}
 }
 
+func TestConvertAddsOpenStackRequestIDAttribute(t *testing.T) {
+	rep := report.Report{
+		Info: map[string]any{"name": "total", "started": float64(0), "finished": float64(1)},
+		Children: []report.Node{
+			{
+				TraceID:  "span-1",
+				ParentID: "base-1",
+				Info: map[string]any{
+					"name":     "wsgi",
+					"project":  "nova",
+					"service":  "public",
+					"host":     "compute-1",
+					"started":  float64(0),
+					"finished": float64(1),
+					"meta.raw_payload.wsgi-start": map[string]any{
+						"timestamp": "2026-04-25T15:30:00.000000",
+						"info": map[string]any{
+							"request": map[string]any{
+								"method": "GET",
+								"path":   "/v2.1/servers/detail",
+							},
+							"headers": map[string]any{
+								"x-openstack-request-id": "req-D33F246F-86A2-42CC-AAE2-DBC5F49A6FF4",
+							},
+						},
+					},
+					"meta.raw_payload.wsgi-stop": map[string]any{
+						"timestamp": "2026-04-25T15:30:00.001000",
+						"info":      map[string]any{},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := Convert(rep, Options{
+		BaseID:      "251bb5c1-30fb-4b04-a223-4410b831d4d7",
+		ServiceName: "osprofiler-bridge",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var target *tracepb.Span
+	for _, rs := range result.Request.ResourceSpans {
+		for _, scope := range rs.ScopeSpans {
+			if span := spanByName(scope.Spans, "nova.wsgi GET /v2.1/servers/detail"); span != nil {
+				target = span
+			}
+		}
+	}
+	if target == nil {
+		t.Fatal("missing nova wsgi span")
+	}
+	if got := attr(target.Attributes, "openstack.request_id"); got != "req-d33f246f-86a2-42cc-aae2-dbc5f49a6ff4" {
+		t.Fatalf("openstack.request_id = %q", got)
+	}
+}
+
 func spanByName(spans []*tracepb.Span, name string) *tracepb.Span {
 	for _, span := range spans {
 		if span.Name == name {
