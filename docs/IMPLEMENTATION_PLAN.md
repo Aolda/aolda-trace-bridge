@@ -229,9 +229,11 @@ Rules:
 - If `parent_id == base_id`, attach the span to the synthetic root span.
 - Synthetic root span has no parent span ID.
 - Synthetic root span name is `osprofiler.total`.
-- Span name: `info.name`, else `name`, else `osprofiler.span`.
+- Span name: project-qualified operation, with HTTP/SQL summaries when available, for example `keystone.wsgi POST /v3/auth/tokens` or `keystone.db SELECT user`.
 - Start/end: raw payload start/stop timestamps first; relative `started`/`finished` offsets only as fallback.
-- Resource `service.name`: config value, default `osprofiler-bridge`.
+- Resource `service.name`: OSProfiler project, for example `keystone`; fallback to config value, default `osprofiler-bridge`.
+- Resource `service.namespace`: `openstack`.
+- Resource `service.instance.id`: OSProfiler host when known; spans are grouped by host.
 - Attributes: redacted `osprofiler.info_json` plus selected OSProfiler IDs.
 
 Use OTLP protobuf types directly instead of trying to create live OpenTelemetry SDK spans, because the converter must preserve existing trace/span IDs.
@@ -318,7 +320,7 @@ Manual verification:
 - Run bridge against the same `base_id` with `osprofiler-tempo-bridge export --base-id <uuid> --config <path>`.
 - Confirm OTel Collector receives the request and forwards it to Tempo.
 - Confirm Tempo ingest metrics increased.
-- Search in Grafana Tempo by `service.name = osprofiler-bridge`.
+- Search in Grafana Tempo by trace ID first, then by `service.name = <project>` such as `keystone`.
 - Confirm spans appear with stable parent-child relationships where possible.
 - Confirm logs do not include Redis passwords, full connection strings, SQL params, or full trace payloads.
 
@@ -333,7 +335,7 @@ Implementation is complete when:
 5. The Docker image builds and includes the Go bridge, Python helper, Python runtime, `osprofiler`, and Redis/Valkey Python dependency.
 6. Running the container with `OSPROFILER_CONNECTION_STRING` and `OTLP_ENDPOINT` can export a real `base_id`.
 7. OTel Collector receives the OTLP request and forwards it to Tempo.
-8. Grafana Tempo can find the exported trace under `service.name = osprofiler-bridge`.
+8. Grafana Tempo can find the exported trace by trace ID and under `service.name = <project>` such as `keystone`.
 9. Logs are checked for absence of Redis passwords, full connection strings, SQL params, and full trace payloads.
 
 ## Phase 10: Deferred Automation
@@ -346,7 +348,7 @@ After MVP works, revisit:
 - Redis-backed done marker.
 - Late-event detection.
 - Duplicate prevention.
-- More precise `service.name = <project>.<service>`.
+- Additional OpenTelemetry semantic convention mapping beyond the current project/host resource grouping.
 - HTTP/DB/RPC semantic attributes.
 
 Do not pull these into the first implementation unless the owner explicitly expands scope.

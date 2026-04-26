@@ -66,17 +66,20 @@ The image should include:
 
 Configuration and secrets should be passed through config and environment variables, not baked into the image.
 
-## Decided: MVP Resource Service Name
+## Decided: Resource Service Name
 
 Decision:
 
 ```text
-service.name = "osprofiler-bridge"
+service.name = <project>, for example "keystone"
+service.namespace = "openstack"
+service.instance.id = <host> when known
+fallback service.name = "osprofiler-bridge"
 ```
 
 Reason:
 
-This keeps the PoC focused on end-to-end export. More precise OpenStack service grouping can be added after real JSON samples confirm where project/service fields appear in the report tree.
+The MVP proved end-to-end export. The next mapping step groups spans by OSProfiler project and host so Grafana shows OpenStack services and instances instead of only the bridge process.
 
 ## Decided: MVP ID Conversion
 
@@ -187,7 +190,7 @@ The MVP is successful when all of these are true:
 4. The Docker image builds and contains the Go bridge, Python helper, Python runtime, `osprofiler`, and Redis/Valkey Python dependency.
 5. A container run can export a real `base_id` using `OSPROFILER_CONNECTION_STRING` and `OTLP_ENDPOINT`.
 6. OTel Collector receives the request and forwards it to Tempo.
-7. Grafana Tempo can find the trace under `service.name = osprofiler-bridge`.
+7. Grafana Tempo can find the trace by trace ID and under `service.name = <project>` such as `keystone`.
 8. Logs do not contain Redis passwords, full connection strings, SQL params, or full trace payloads.
 
 ## Deferred: Automatic Discovery and Done State

@@ -223,9 +223,10 @@ synthetic root span -> empty parent_span_id
 Span name:
 
 ```text
-info.name if present
-else name if present
-else "osprofiler.span"
+<project>.<operation>
+wsgi -> <project>.wsgi <METHOD> <PATH> when request metadata exists
+db -> <project>.db <SQL_OPERATION> <TABLE> when SQL metadata exists
+fallback -> operation or "osprofiler.span"
 ```
 
 Timestamps:
@@ -239,7 +240,11 @@ else timestamp for both start and end
 Resource attributes:
 
 ```text
-service.name = "osprofiler-bridge"
+service.name = <project>, for example "keystone"
+service.namespace = "openstack"
+service.instance.id = <host> when known
+host.name = <host> when known
+fallback service.name = bridge.service_name
 ```
 
 Span attributes:
@@ -297,5 +302,5 @@ The MVP is successful when:
 4. The Docker image builds with the Go bridge, Python helper, Python runtime, `osprofiler`, and Redis/Valkey Python dependency.
 5. A container run exports a real `base_id` using config/env-provided `OSPROFILER_CONNECTION_STRING` and `OTLP_ENDPOINT`.
 6. OTel Collector receives the request and forwards it to Tempo.
-7. Grafana Tempo can find the exported trace under `service.name = osprofiler-bridge`.
+7. Grafana Tempo can find the exported trace by trace ID and under `service.name = <project>` such as `keystone`.
 8. Logs do not contain Redis passwords, full connection strings, SQL params, or full trace payloads.

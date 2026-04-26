@@ -3,6 +3,7 @@ package otlp
 import (
 	"encoding/json"
 	"fmt"
+	"regexp"
 	"strings"
 	"time"
 
@@ -50,24 +51,7 @@ func Convert(r report.Report, opts Options) (Result, error) {
 	}
 
 	req := &collectortrace.ExportTraceServiceRequest{
-		ResourceSpans: []*tracepb.ResourceSpans{
-			{
-				Resource: &resourcepb.Resource{
-					Attributes: []*commonpb.KeyValue{
-						stringKV("service.name", serviceName),
-					},
-				},
-				ScopeSpans: []*tracepb.ScopeSpans{
-					{
-						Scope: &commonpb.InstrumentationScope{
-							Name:    "osprofiler-tempo-bridge",
-							Version: "0.1.0",
-						},
-						Spans: spans,
-					},
-				},
-			},
-		},
+		ResourceSpans: resourceSpans(spans, serviceName),
 	}
 
 	return Result{Request: req, SpanCount: len(spans)}, nil
@@ -95,7 +79,7 @@ func convertNode(node report.Node, opts Options, traceID []byte, treeParentSpanI
 		TraceId:           traceID,
 		SpanId:            spanID,
 		ParentSpanId:      parentSpanID,
-		Name:              spanName(node),
+		Name:              displaySpanName(node),
 		Kind:              tracepb.Span_SPAN_KIND_INTERNAL,
 		StartTimeUnixNano: uint64(start),
 		EndTimeUnixNano:   uint64(end),
@@ -115,6 +99,70 @@ func convertNode(node report.Node, opts Options, traceID []byte, treeParentSpanI
 		spans = append(spans, convertNode(child, opts, traceID, spanID, childPath, traceStart)...)
 	}
 	return spans
+}
+
+func resourceSpans(spans []*tracepb.Span, fallbackServiceName string) []*tracepb.ResourceSpans {
+	commonProject := commonSpanAttr(spans, "osprofiler.project")
+	commonHost := commonSpanAttr(spans, "osprofiler.host")
+
+	type resourceGroup struct {
+		project string
+		host    string
+		spans   []*tracepb.Span
+	}
+
+	var order []string
+	groups := map[string]*resourceGroup{}
+	for _, span := range spans {
+		project := attrValue(span.Attributes, "osprofiler.project")
+		host := attrValue(span.Attributes, "osprofiler.host")
+		if attrValue(span.Attributes, "osprofiler.synthetic_root") == "true" {
+			project = commonProject
+			host = commonHost
+		}
+		key := project + "\x00" + host
+		group, ok := groups[key]
+		if !ok {
+			group = &resourceGroup{project: project, host: host}
+			groups[key] = group
+			order = append(order, key)
+		}
+		group.spans = append(group.spans, span)
+	}
+
+	var out []*tracepb.ResourceSpans
+	for _, key := range order {
+		group := groups[key]
+		serviceName := group.project
+		if serviceName == "" {
+			serviceName = fallbackServiceName
+		}
+
+		attrs := []*commonpb.KeyValue{
+			stringKV("service.name", serviceName),
+			stringKV("service.namespace", "openstack"),
+		}
+		if group.host != "" {
+			attrs = append(attrs, stringKV("service.instance.id", group.host))
+			attrs = append(attrs, stringKV("host.name", group.host))
+		}
+
+		out = append(out, &tracepb.ResourceSpans{
+			Resource: &resourcepb.Resource{
+				Attributes: attrs,
+			},
+			ScopeSpans: []*tracepb.ScopeSpans{
+				{
+					Scope: &commonpb.InstrumentationScope{
+						Name:    "osprofiler-tempo-bridge",
+						Version: "0.1.0",
+					},
+					Spans: group.spans,
+				},
+			},
+		})
+	}
+	return out
 }
 
 func rootSpan(r report.Report, opts Options, traceID []byte, spanID []byte, children []*tracepb.Span) *tracepb.Span {
@@ -181,15 +229,36 @@ func reportTimes(info map[string]any, fallbackStart uint64) (uint64, uint64) {
 	return uint64(start.UnixNano()), uint64(end.UnixNano())
 }
 
-func spanName(node report.Node) string {
+func osprofilerOperationName(node report.Node) string {
 	if name := report.InfoString(node.Info, "name"); name != "" {
 		return name
 	}
 	return "osprofiler.span"
 }
 
+func displaySpanName(node report.Node) string {
+	operation := osprofilerOperationName(node)
+	project := report.InfoString(node.Info, "project")
+	prefix := operation
+	if project != "" {
+		prefix = project + "." + operation
+	}
+
+	switch operation {
+	case "wsgi":
+		if method, path := httpRequestSummary(node.Info, operation); method != "" && path != "" {
+			return prefix + " " + method + " " + path
+		}
+	case "db":
+		if summary := dbStatementSummary(node.Info, operation); summary != "" {
+			return prefix + " " + summary
+		}
+	}
+	return prefix
+}
+
 func nodeTimes(node report.Node, traceStart time.Time) (uint64, uint64) {
-	name := spanName(node)
+	name := osprofilerOperationName(node)
 	startTime, startOK := rawPayloadTimestamp(node.Info, name+"-start")
 	endTime, endOK := rawPayloadTimestamp(node.Info, name+"-stop")
 	if startOK && endOK {
@@ -217,16 +286,91 @@ func nodeTimes(node report.Node, traceStart time.Time) (uint64, uint64) {
 	return 0, 0
 }
 
-func rawPayloadTimestamp(info map[string]any, payloadName string) (time.Time, bool) {
-	if info == nil {
-		return time.Time{}, false
-	}
-	key := "meta.raw_payload." + payloadName
-	value, ok := info[key]
+func httpRequestSummary(info map[string]any, operation string) (string, string) {
+	payload, ok := rawPayload(info, operation+"-start")
 	if !ok {
-		return time.Time{}, false
+		return "", ""
 	}
-	payload, ok := value.(map[string]any)
+	payloadInfo, ok := payload["info"].(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	request, ok := payloadInfo["request"].(map[string]any)
+	if !ok {
+		return "", ""
+	}
+	method, _ := request["method"].(string)
+	path, _ := request["path"].(string)
+	return strings.ToUpper(method), path
+}
+
+func dbStatementSummary(info map[string]any, operation string) string {
+	payload, ok := rawPayload(info, operation+"-start")
+	if !ok {
+		return ""
+	}
+	payloadInfo, ok := payload["info"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	db, ok := payloadInfo["db"].(map[string]any)
+	if !ok {
+		return ""
+	}
+	statement, _ := db["statement"].(string)
+	return sqlStatementSummary(statement)
+}
+
+var (
+	sqlFromRE       = regexp.MustCompile(`(?i)\bFROM\s+([A-Za-z_][A-Za-z0-9_.$]*)`)
+	sqlIntoRE       = regexp.MustCompile(`(?i)\bINTO\s+([A-Za-z_][A-Za-z0-9_.$]*)`)
+	sqlUpdateRE     = regexp.MustCompile(`(?i)\bUPDATE\s+([A-Za-z_][A-Za-z0-9_.$]*)`)
+	sqlOperationRE  = regexp.MustCompile(`(?i)^\s*([A-Z]+)\b`)
+	identifierTrim  = strings.NewReplacer(`"`, "", "`", "", "[", "", "]", "")
+	whitespaceRunRE = regexp.MustCompile(`\s+`)
+)
+
+func sqlStatementSummary(statement string) string {
+	statement = whitespaceRunRE.ReplaceAllString(strings.TrimSpace(statement), " ")
+	if statement == "" {
+		return ""
+	}
+
+	operation := "SQL"
+	if match := sqlOperationRE.FindStringSubmatch(statement); len(match) == 2 {
+		operation = strings.ToUpper(match[1])
+	}
+
+	table := ""
+	switch operation {
+	case "SELECT", "DELETE":
+		table = firstSQLIdentifier(statement, sqlFromRE)
+	case "INSERT":
+		table = firstSQLIdentifier(statement, sqlIntoRE)
+	case "UPDATE":
+		table = firstSQLIdentifier(statement, sqlUpdateRE)
+	}
+	if table == "" {
+		return operation
+	}
+	return operation + " " + table
+}
+
+func firstSQLIdentifier(statement string, re *regexp.Regexp) string {
+	match := re.FindStringSubmatch(statement)
+	if len(match) != 2 {
+		return ""
+	}
+	identifier := identifierTrim.Replace(match[1])
+	identifier = strings.Trim(identifier, " ,;()")
+	if dot := strings.LastIndex(identifier, "."); dot >= 0 && dot < len(identifier)-1 {
+		identifier = identifier[dot+1:]
+	}
+	return identifier
+}
+
+func rawPayloadTimestamp(info map[string]any, payloadName string) (time.Time, bool) {
+	payload, ok := rawPayload(info, payloadName)
 	if !ok {
 		return time.Time{}, false
 	}
@@ -239,6 +383,22 @@ func rawPayloadTimestamp(info map[string]any, payloadName string) (time.Time, bo
 		return time.Time{}, false
 	}
 	return parsed, true
+}
+
+func rawPayload(info map[string]any, payloadName string) (map[string]any, bool) {
+	if info == nil {
+		return nil, false
+	}
+	key := "meta.raw_payload." + payloadName
+	value, ok := info[key]
+	if !ok {
+		return nil, false
+	}
+	payload, ok := value.(map[string]any)
+	if !ok {
+		return nil, false
+	}
+	return payload, true
 }
 
 func earliestRawTimestamp(nodes []report.Node) time.Time {
@@ -330,6 +490,36 @@ func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if value != "" {
 			return value
+		}
+	}
+	return ""
+}
+
+func commonSpanAttr(spans []*tracepb.Span, key string) string {
+	var common string
+	for _, span := range spans {
+		if attrValue(span.Attributes, "osprofiler.synthetic_root") == "true" {
+			continue
+		}
+		value := attrValue(span.Attributes, key)
+		if value == "" {
+			continue
+		}
+		if common == "" {
+			common = value
+			continue
+		}
+		if common != value {
+			return ""
+		}
+	}
+	return common
+}
+
+func attrValue(attrs []*commonpb.KeyValue, key string) string {
+	for _, kv := range attrs {
+		if kv.Key == key {
+			return kv.Value.GetStringValue()
 		}
 	}
 	return ""

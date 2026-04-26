@@ -35,15 +35,35 @@ func TestConvertFixtureToOTLP(t *testing.T) {
 	}
 
 	resourceSpans := result.Request.ResourceSpans
-	if len(resourceSpans) != 1 {
-		t.Fatalf("resource spans len = %d", len(resourceSpans))
-	}
-	if got := attr(resourceSpans[0].Resource.Attributes, "service.name"); got != "osprofiler-bridge" {
-		t.Fatalf("service.name = %q", got)
+	if len(resourceSpans) != 3 {
+		t.Fatalf("resource spans len = %d, want 3", len(resourceSpans))
 	}
 
-	spans := resourceSpans[0].ScopeSpans[0].Spans
-	root := spans[0]
+	var spans []*tracepb.Span
+	spanResourceAttrs := map[*tracepb.Span][]*commonpb.KeyValue{}
+	for _, rs := range resourceSpans {
+		resourceAttrs := rs.Resource.Attributes
+		if got := attr(resourceAttrs, "service.name"); got != "keystone" {
+			t.Fatalf("resource service.name = %q, want keystone", got)
+		}
+		if got := attr(resourceAttrs, "service.namespace"); got != "openstack" {
+			t.Fatalf("resource service.namespace = %q, want openstack", got)
+		}
+		for _, scope := range rs.ScopeSpans {
+			for _, span := range scope.Spans {
+				spans = append(spans, span)
+				spanResourceAttrs[span] = resourceAttrs
+			}
+		}
+	}
+	if len(spans) != result.SpanCount {
+		t.Fatalf("collected spans = %d, want %d", len(spans), result.SpanCount)
+	}
+
+	root := spanByName(spans, "osprofiler.total")
+	if root == nil {
+		t.Fatal("missing synthetic root span")
+	}
 	if root.Name != "osprofiler.total" {
 		t.Fatalf("root span name = %q, want osprofiler.total", root.Name)
 	}
@@ -55,6 +75,9 @@ func TestConvertFixtureToOTLP(t *testing.T) {
 	}
 	if got := attr(root.Attributes, "osprofiler.synthetic_root"); got != "true" {
 		t.Fatalf("root synthetic attribute = %q, want true", got)
+	}
+	if got := attr(spanResourceAttrs[root], "service.instance.id"); got != "" {
+		t.Fatalf("root service.instance.id = %q, want empty because trace spans multiple hosts", got)
 	}
 
 	var sawChildOfRoot bool
@@ -99,16 +122,63 @@ func TestConvertFixtureToOTLP(t *testing.T) {
 	if computeWSGI == nil {
 		t.Fatal("missing compute wsgi span")
 	}
+	if computeWSGI.Name != "keystone.wsgi POST /v3/auth/tokens" {
+		t.Fatalf("compute wsgi name = %q", computeWSGI.Name)
+	}
+	if got := attr(spanResourceAttrs[computeWSGI], "service.instance.id"); got != "aolda-compute" {
+		t.Fatalf("compute wsgi service.instance.id = %q, want aolda-compute", got)
+	}
 	if !bytes.Equal(computeWSGI.ParentSpanId, root.SpanId) {
 		t.Fatalf("compute wsgi parent = %x, want root %x", computeWSGI.ParentSpanId, root.SpanId)
+	}
+	storageWSGI := byOSProfilerTraceID["220a5259-7225-4098-9b5d-6aa857ca297b"]
+	if storageWSGI == nil {
+		t.Fatal("missing storage wsgi span")
+	}
+	if storageWSGI.Name != "keystone.wsgi GET /" {
+		t.Fatalf("storage wsgi name = %q", storageWSGI.Name)
+	}
+	if got := attr(spanResourceAttrs[storageWSGI], "service.instance.id"); got != "aolda-storage" {
+		t.Fatalf("storage wsgi service.instance.id = %q, want aolda-storage", got)
 	}
 	dbSpan := byOSProfilerTraceID["ca5fcf6c-4c07-4d83-88d2-cbecf4c22c6d"]
 	if dbSpan == nil {
 		t.Fatal("missing db span")
 	}
+	if dbSpan.Name != "keystone.db SQL" {
+		t.Fatalf("db span name = %q", dbSpan.Name)
+	}
+	if got := attr(spanResourceAttrs[dbSpan], "service.instance.id"); got != "aolda-compute" {
+		t.Fatalf("db service.instance.id = %q, want aolda-compute", got)
+	}
 	if !bytes.Equal(dbSpan.ParentSpanId, computeWSGI.SpanId) {
 		t.Fatalf("db parent = %x, want compute wsgi %x", dbSpan.ParentSpanId, computeWSGI.SpanId)
 	}
+}
+
+func TestSQLStatementSummary(t *testing.T) {
+	tests := map[string]string{
+		"SELECT user.id AS user_id FROM user WHERE user.id = %(pk_1)s": "SELECT user",
+		"SELECT role_option.role_id FROM (SELECT role.id AS role_id FROM role WHERE role.id = %(pk_1)s) AS anon_1 INNER JOIN role_option ON anon_1.role_id = role_option.role_id": "SELECT role",
+		"INSERT INTO token (id) VALUES (%(id)s)":      "INSERT token",
+		"UPDATE public.user SET enabled = true":       "UPDATE user",
+		"DELETE FROM service_provider WHERE id = 'x'": "DELETE service_provider",
+		"<redacted sql>": "SQL",
+	}
+	for statement, want := range tests {
+		if got := sqlStatementSummary(statement); got != want {
+			t.Fatalf("sqlStatementSummary(%q) = %q, want %q", statement, got, want)
+		}
+	}
+}
+
+func spanByName(spans []*tracepb.Span, name string) *tracepb.Span {
+	for _, span := range spans {
+		if span.Name == name {
+			return span
+		}
+	}
+	return nil
 }
 
 func attr(attrs []*commonpb.KeyValue, key string) string {

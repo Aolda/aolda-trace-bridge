@@ -243,24 +243,16 @@ If only one timestamp exists, emit a best-effort span with zero or minimal durat
 
 ## Resource Grouping
 
-MVP:
+Resource attributes are derived from OSProfiler span metadata:
 
 ```text
-service.name = "osprofiler-bridge"
-```
-
-Reason:
-
-The PoC should verify end-to-end export before committing to OpenStack service grouping semantics.
-
-Future:
-
-```text
-service.name = <project>.<service>
-osprofiler.project = <project>
-osprofiler.service = <service>
+service.name = <project>, for example "keystone"
+service.namespace = "openstack"
+service.instance.id = <host>, for example "aolda-compute"
 host.name = <host>
 ```
+
+Spans are grouped into separate OTLP `ResourceSpans` when the host differs. The synthetic root span uses the common project when all child spans share one project, and omits `service.instance.id` when the trace spans multiple hosts. If project metadata is missing, `bridge.service_name` is used as the fallback `service.name`.
 
 ## Span Attributes
 

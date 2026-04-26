@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
+	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
 	"google.golang.org/protobuf/proto"
 )
 
@@ -30,8 +31,20 @@ func TestRunExportWithFakeHelperAndOTLPServer(t *testing.T) {
 		if err := proto.Unmarshal(body, &req); err != nil {
 			t.Fatal(err)
 		}
-		if len(req.ResourceSpans) != 1 {
+		if len(req.ResourceSpans) != 3 {
 			t.Fatalf("resource spans len = %d", len(req.ResourceSpans))
+		}
+		var sawComputeResource bool
+		for _, rs := range req.ResourceSpans {
+			if got := attr(rs.Resource.Attributes, "service.name"); got != "keystone" {
+				t.Fatalf("service.name = %q, want keystone", got)
+			}
+			if attr(rs.Resource.Attributes, "service.instance.id") == "aolda-compute" {
+				sawComputeResource = true
+			}
+		}
+		if !sawComputeResource {
+			t.Fatal("missing aolda-compute resource")
 		}
 		w.WriteHeader(http.StatusOK)
 	}))
@@ -88,4 +101,13 @@ bridge:
 	if !sawOTLP {
 		t.Fatal("otlp server did not receive request")
 	}
+}
+
+func attr(attrs []*commonpb.KeyValue, key string) string {
+	for _, kv := range attrs {
+		if kv.Key == key {
+			return kv.Value.GetStringValue()
+		}
+	}
+	return ""
 }
