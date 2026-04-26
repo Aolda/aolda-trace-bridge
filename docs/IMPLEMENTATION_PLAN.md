@@ -153,7 +153,7 @@ Report model guidance:
 
 - Represent `info` as `map[string]any`.
 - Represent `children` recursively.
-- Treat top-level `info.name = total` as a report container by default.
+- Treat top-level `info.name = total` as the source container and export it as a synthetic OTLP root span.
 - Extract known fields opportunistically.
 - Preserve unknown fields in `osprofiler.info_json`.
 - Never assume every node has every ID or timestamp field.
@@ -223,10 +223,12 @@ Build OTLP spans from the report tree.
 Rules:
 
 - Trace ID: `base_id` UUID raw 16 bytes; fallback stable 128-bit hash.
+- Synthetic root span ID: `base_id` stable 64-bit hash.
 - Span ID: node `trace_id` or `id` stable 64-bit hash; fallback hash of node path.
 - Parent span ID: `parent_id` stable 64-bit hash when present; otherwise tree parent span ID.
-- If `parent_id == base_id`, treat the span as a root span with no parent unless synthetic-root export is later approved.
-- Root span has no parent span ID.
+- If `parent_id == base_id`, attach the span to the synthetic root span.
+- Synthetic root span has no parent span ID.
+- Synthetic root span name is `osprofiler.total`.
 - Span name: `info.name`, else `name`, else `osprofiler.span`.
 - Start/end: raw payload start/stop timestamps first; relative `started`/`finished` offsets only as fallback.
 - Resource `service.name`: config value, default `osprofiler-bridge`.

@@ -214,9 +214,10 @@ fallback -> stable 64-bit hash of the node path
 Parent span ID:
 
 ```text
-parent_id if present -> stable 64-bit hash
+parent_id if present and not base_id -> stable 64-bit hash
+parent_id == base_id -> synthetic root span id
 otherwise derive from the report tree parent
-root span -> empty parent_span_id
+synthetic root span -> empty parent_span_id
 ```
 
 Span name:

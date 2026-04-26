@@ -36,11 +36,17 @@ func Convert(r report.Report, opts Options) (Result, error) {
 	}
 
 	traceStart := earliestRawTimestamp(r.Children)
+	rootSpanID := SpanIDFromString(opts.BaseID)
 
 	var spans []*tracepb.Span
 	for i, child := range r.SpanNodes() {
 		path := fmt.Sprintf("%d", i)
-		spans = append(spans, convertNode(child, opts, traceID, nil, path, traceStart)...)
+		spans = append(spans, convertNode(child, opts, traceID, rootSpanID, path, traceStart)...)
+	}
+
+	if len(spans) > 0 {
+		root := rootSpan(r, opts, traceID, rootSpanID, spans)
+		spans = append([]*tracepb.Span{root}, spans...)
 	}
 
 	req := &collectortrace.ExportTraceServiceRequest{
@@ -72,7 +78,9 @@ func convertNode(node report.Node, opts Options, traceID []byte, treeParentSpanI
 	spanID := SpanIDFromString(spanKey)
 
 	var parentSpanID []byte
-	if node.ParentID != "" && node.ParentID != opts.BaseID {
+	if node.ParentID == opts.BaseID && len(treeParentSpanID) > 0 {
+		parentSpanID = treeParentSpanID
+	} else if node.ParentID != "" && node.ParentID != opts.BaseID {
 		parentSpanID = SpanIDFromString(node.ParentID)
 	} else if node.ParentID == "" && len(treeParentSpanID) > 0 {
 		parentSpanID = treeParentSpanID
@@ -107,6 +115,70 @@ func convertNode(node report.Node, opts Options, traceID []byte, treeParentSpanI
 		spans = append(spans, convertNode(child, opts, traceID, spanID, childPath, traceStart)...)
 	}
 	return spans
+}
+
+func rootSpan(r report.Report, opts Options, traceID []byte, spanID []byte, children []*tracepb.Span) *tracepb.Span {
+	start, end := spanBounds(children)
+	if start == 0 || end == 0 {
+		fallbackStart := start
+		if fallbackStart == 0 {
+			fallbackStart = end
+		}
+		reportStart, reportEnd := reportTimes(r.Info, fallbackStart)
+		if start == 0 {
+			start = reportStart
+		}
+		if end == 0 {
+			end = reportEnd
+		}
+	}
+	if end < start {
+		end = start
+	}
+
+	name := report.InfoString(r.Info, "name")
+	if name == "" || name == "total" {
+		name = "osprofiler.total"
+	}
+
+	return &tracepb.Span{
+		TraceId:           traceID,
+		SpanId:            spanID,
+		Name:              name,
+		Kind:              tracepb.Span_SPAN_KIND_INTERNAL,
+		StartTimeUnixNano: start,
+		EndTimeUnixNano:   end,
+		Attributes:        rootAttributes(opts.BaseID, r, opts.Redaction),
+	}
+}
+
+func spanBounds(spans []*tracepb.Span) (uint64, uint64) {
+	var start uint64
+	var end uint64
+	for _, span := range spans {
+		if span.StartTimeUnixNano != 0 && (start == 0 || span.StartTimeUnixNano < start) {
+			start = span.StartTimeUnixNano
+		}
+		if span.EndTimeUnixNano > end {
+			end = span.EndTimeUnixNano
+		}
+	}
+	return start, end
+}
+
+func reportTimes(info map[string]any, fallbackStart uint64) (uint64, uint64) {
+	if fallbackStart == 0 {
+		return 0, 0
+	}
+	startOffset, hasStart := report.InfoFloat(info, "started")
+	endOffset, hasEnd := report.InfoFloat(info, "finished")
+	if !hasStart || !hasEnd {
+		return fallbackStart, fallbackStart
+	}
+	base := time.Unix(0, int64(fallbackStart)).Add(-time.Duration(startOffset * float64(time.Millisecond)))
+	start := base.Add(time.Duration(startOffset * float64(time.Millisecond)))
+	end := base.Add(time.Duration(endOffset * float64(time.Millisecond)))
+	return uint64(start.UnixNano()), uint64(end.UnixNano())
 }
 
 func spanName(node report.Node) string {
@@ -221,6 +293,26 @@ func spanAttributes(baseID string, node report.Node, opts redaction.Options) []*
 	data, err := json.Marshal(redacted)
 	if err == nil {
 		attrs = append(attrs, stringKV("osprofiler.info_json", string(data)))
+	}
+	return attrs
+}
+
+func rootAttributes(baseID string, r report.Report, opts redaction.Options) []*commonpb.KeyValue {
+	attrs := []*commonpb.KeyValue{
+		stringKV("osprofiler.base_id", baseID),
+		stringKV("osprofiler.synthetic_root", "true"),
+	}
+
+	redacted := redaction.Redact(r.Info, opts)
+	data, err := json.Marshal(redacted)
+	if err == nil {
+		attrs = append(attrs, stringKV("osprofiler.info_json", string(data)))
+	}
+	if len(r.Stats) > 0 {
+		data, err := json.Marshal(r.Stats)
+		if err == nil {
+			attrs = append(attrs, stringKV("osprofiler.stats_json", string(data)))
+		}
 	}
 	return attrs
 }

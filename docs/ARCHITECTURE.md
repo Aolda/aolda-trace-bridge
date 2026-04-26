@@ -166,7 +166,7 @@ Observed report shape:
 Implementation implication:
 
 ```text
-Treat top-level "total" as a container, not a normal exported span, unless a later decision explicitly creates a synthetic root span.
+Export top-level "total" as a synthetic root span named "osprofiler.total" so Grafana can render one coherent trace tree.
 ```
 
 ## Observed Redis Raw Event Sample
@@ -209,10 +209,12 @@ MVP rule:
 
 - `base_id`: parse UUID and use raw 16 bytes as OTLP trace ID.
 - non-UUID `base_id`: use a stable 128-bit hash.
+- synthetic root span: use stable 64-bit hash of `base_id` as span ID.
 - node `trace_id` or `id`: use stable 64-bit hash as span ID.
 - `parent_id`: use stable 64-bit hash if present.
+- if `parent_id == base_id`, attach the span to the synthetic root span.
 - if `parent_id` is absent, derive parent span ID from the report tree parent.
-- root span has no parent span ID.
+- synthetic root span has no parent span ID.
 
 The hash algorithm must be deterministic across process restarts and bridge versions unless a documented migration is made.
 
