@@ -102,16 +102,18 @@ one OTLP TraceServiceRequest exported to the configured endpoint
 11. Non-2xx responses and timeouts must be treated as export failures.
 12. The bridge must not log full trace payloads by default.
 13. If the Python helper exits, times out, or emits malformed protocol output, the bridge must fail the current export with a clear error and exit.
+14. Watch mode must poll OSProfiler driver trace listings in bounded batches.
+15. Watch mode must wait `watch.export_delay` before export to reduce late-event loss.
+16. Watch mode must record exported traces in a local state file to avoid duplicate export and retry Redis deletion without resending spans.
+17. Watch mode may delete Redis-backed OSProfiler trace keys after successful OTLP export when `watch.delete_after_export` is enabled.
 
 ## Explicit MVP Non-Goals
 
 - Do not scan Redis directly for `osprofiler_opt:*`.
 - Do not parse Redis raw list entries in Go.
 - Do not implement start/stop pair matching in Go.
-- Do not implement automatic polling.
-- Do not implement batch export.
-- Do not implement done markers or late-event detection.
-- Do not delete OSProfiler Redis keys.
+- Do not implement Redis locks or multi-worker exactly-once processing.
+- Do not implement complete late-event detection beyond a configurable export delay.
 - Do not implement complete OpenTelemetry semantic convention mapping.
 - Do not add OpenSearch support.
 - Do not modify OpenStack service container images.
@@ -124,6 +126,8 @@ Responsibilities:
 
 - Initialize OSProfiler storage driver from the configured connection string.
 - Serve `get_report` requests.
+- Serve `list_traces` requests.
+- Serve `delete_trace` requests for Redis-backed cleanup after successful export.
 - Return OSProfiler report JSON exactly enough for Go to convert it.
 - Return structured errors for not found, driver initialization failure, malformed request, and unexpected exceptions.
 
@@ -272,16 +276,18 @@ Later versions can promote selected fields into semantic attributes such as HTTP
 
 ## Operating Model
 
-MVP delivery model:
+Delivery model:
 
 ```text
 operator-triggered single trace export
+or bounded watch-mode polling
 ```
 
-MVP retry model:
+Retry model:
 
 ```text
-manual retry by rerunning the same base_id export
+single export: manual retry by rerunning the same base_id export
+watch mode: local state prevents duplicate export after success
 ```
 
 Longer-term delivery model:
@@ -290,7 +296,7 @@ Longer-term delivery model:
 at-least-once
 ```
 
-Automatic discovery, duplicate prevention, done markers, and late-event handling are deferred until after the single-trace path is proven.
+Redis locks, done markers, and stronger late-event handling remain deferred.
 
 ## MVP Success Criteria
 

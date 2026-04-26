@@ -35,10 +35,17 @@ type Request struct {
 }
 
 type Response struct {
-	ID     string          `json:"id"`
-	OK     bool            `json:"ok"`
-	Report json.RawMessage `json:"report,omitempty"`
-	Error  *ResponseError  `json:"error,omitempty"`
+	ID      string          `json:"id"`
+	OK      bool            `json:"ok"`
+	Report  json.RawMessage `json:"report,omitempty"`
+	Traces  []TraceSummary  `json:"traces,omitempty"`
+	Deleted int             `json:"deleted,omitempty"`
+	Error   *ResponseError  `json:"error,omitempty"`
+}
+
+type TraceSummary struct {
+	BaseID    string `json:"base_id"`
+	Timestamp string `json:"timestamp,omitempty"`
 }
 
 type ResponseError struct {
@@ -124,6 +131,47 @@ func (c *Client) GetReport(ctx context.Context, baseID string) (json.RawMessage,
 	if baseID == "" {
 		return nil, errors.New("base_id is required")
 	}
+	resp, err := c.request(ctx, Request{
+		ID:     "1",
+		Method: "get_report",
+		BaseID: baseID,
+	}, "get_report")
+	if err != nil {
+		return nil, err
+	}
+	if len(resp.Report) == 0 {
+		return nil, errors.New("helper returned empty report")
+	}
+	return resp.Report, nil
+}
+
+func (c *Client) ListTraces(ctx context.Context) ([]TraceSummary, error) {
+	resp, err := c.request(ctx, Request{
+		ID:     "1",
+		Method: "list_traces",
+	}, "list_traces")
+	if err != nil {
+		return nil, err
+	}
+	return resp.Traces, nil
+}
+
+func (c *Client) DeleteTrace(ctx context.Context, baseID string) (int, error) {
+	if baseID == "" {
+		return 0, errors.New("base_id is required")
+	}
+	resp, err := c.request(ctx, Request{
+		ID:     "1",
+		Method: "delete_trace",
+		BaseID: baseID,
+	}, "delete_trace")
+	if err != nil {
+		return 0, err
+	}
+	return resp.Deleted, nil
+}
+
+func (c *Client) request(ctx context.Context, req Request, operation string) (Response, error) {
 	if c.requestTimeout > 0 {
 		var cancel context.CancelFunc
 		ctx, cancel = context.WithTimeout(ctx, c.requestTimeout)
@@ -134,22 +182,17 @@ func (c *Client) GetReport(ctx context.Context, baseID string) (json.RawMessage,
 	defer c.mu.Unlock()
 
 	if c.cmd == nil {
-		return nil, errors.New("helper is not started")
+		return Response{}, errors.New("helper is not started")
 	}
 
-	req := Request{
-		ID:     "1",
-		Method: "get_report",
-		BaseID: baseID,
-	}
 	line, err := json.Marshal(req)
 	if err != nil {
-		return nil, fmt.Errorf("marshal helper request: %w", err)
+		return Response{}, fmt.Errorf("marshal helper request: %w", err)
 	}
 	line = append(line, '\n')
 
 	if _, err := c.stdin.Write(line); err != nil {
-		return nil, fmt.Errorf("write helper request: %w%s", err, c.stderrSuffix())
+		return Response{}, fmt.Errorf("write helper request: %w%s", err, c.stderrSuffix())
 	}
 
 	respCh := make(chan responseResult, 1)
@@ -163,29 +206,26 @@ func (c *Client) GetReport(ctx context.Context, baseID string) (json.RawMessage,
 		if c.cmd != nil && c.cmd.Process != nil {
 			_ = c.cmd.Process.Kill()
 		}
-		return nil, fmt.Errorf("helper get_report timed out: %w%s", ctx.Err(), c.stderrSuffix())
+		return Response{}, fmt.Errorf("helper %s timed out: %w%s", operation, ctx.Err(), c.stderrSuffix())
 	case err := <-c.done:
 		if err == nil {
 			err = errors.New("helper exited")
 		}
-		return nil, fmt.Errorf("helper exited before response: %w%s", err, c.stderrSuffix())
+		return Response{}, fmt.Errorf("helper exited before response: %w%s", err, c.stderrSuffix())
 	case result := <-respCh:
 		if result.err != nil {
-			return nil, result.err
+			return Response{}, result.err
 		}
 		if result.resp.ID != req.ID {
-			return nil, fmt.Errorf("helper response id mismatch: got %q want %q", result.resp.ID, req.ID)
+			return Response{}, fmt.Errorf("helper response id mismatch: got %q want %q", result.resp.ID, req.ID)
 		}
 		if !result.resp.OK {
 			if result.resp.Error == nil {
-				return nil, errors.New("helper returned error without details")
+				return Response{}, errors.New("helper returned error without details")
 			}
-			return nil, fmt.Errorf("helper %s: %s", result.resp.Error.Code, result.resp.Error.Message)
+			return Response{}, fmt.Errorf("helper %s: %s", result.resp.Error.Code, result.resp.Error.Message)
 		}
-		if len(result.resp.Report) == 0 {
-			return nil, errors.New("helper returned empty report")
-		}
-		return result.resp.Report, nil
+		return result.resp, nil
 	}
 }
 

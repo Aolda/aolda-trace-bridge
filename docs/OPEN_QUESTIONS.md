@@ -193,16 +193,14 @@ The MVP is successful when all of these are true:
 7. Grafana Tempo can find the trace by trace ID and under `service.name = <project>` such as `keystone`.
 8. Logs do not contain Redis passwords, full connection strings, SQL params, or full trace payloads.
 
-## Deferred: Automatic Discovery and Done State
+## Decided: Watch Mode and Cleanup
 
-These are not part of the first implementation:
+After the single-trace path was proven, watch mode was approved:
 
-- `list_traces`
-- Redis scanning
-- polling
-- done markers
-- late-event detection
-- duplicate prevention
-- delete exported Redis keys
+- Poll through the Python helper using OSProfiler driver `list_traces()`.
+- Process traces in bounded batches.
+- Use `watch.export_delay` before export to reduce late-event loss.
+- Record successful exports in a local state file.
+- Delete exported Redis keys after successful OTLP export when `watch.delete_after_export` is enabled.
 
-Revisit after single-trace export works end to end.
+Still deferred: Redis locks, Redis-backed done markers, and stronger completion detection.

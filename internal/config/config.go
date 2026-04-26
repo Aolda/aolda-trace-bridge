@@ -14,6 +14,7 @@ type Config struct {
 	Helper     HelperConfig
 	OTLP       OTLPConfig
 	Bridge     BridgeConfig
+	Watch      WatchConfig
 	Metrics    MetricsConfig
 }
 
@@ -37,6 +38,14 @@ type BridgeConfig struct {
 	RedactDBParams      bool
 	RedactDBStatement   bool
 	RedactSensitiveKeys bool
+}
+
+type WatchConfig struct {
+	PollInterval      time.Duration
+	ExportDelay       time.Duration
+	StateFile         string
+	MaxTracesPerPoll  int
+	DeleteAfterExport bool
 }
 
 type MetricsConfig struct {
@@ -63,6 +72,13 @@ type rawConfig struct {
 		RedactDBStatement   *bool  `yaml:"redact_db_statement"`
 		RedactSensitiveKeys *bool  `yaml:"redact_sensitive_keys"`
 	} `yaml:"bridge"`
+	Watch struct {
+		PollInterval      string `yaml:"poll_interval"`
+		ExportDelay       string `yaml:"export_delay"`
+		StateFile         string `yaml:"state_file"`
+		MaxTracesPerPoll  int    `yaml:"max_traces_per_poll"`
+		DeleteAfterExport *bool  `yaml:"delete_after_export"`
+	} `yaml:"watch"`
 	Metrics struct {
 		ListenAddr string `yaml:"listen_addr"`
 		Path       string `yaml:"path"`
@@ -102,6 +118,11 @@ func LoadFile(path string) (Config, error) {
 			RedactDBStatement:   boolOr(raw.Bridge.RedactDBStatement, false),
 			RedactSensitiveKeys: boolOr(raw.Bridge.RedactSensitiveKeys, true),
 		},
+		Watch: WatchConfig{
+			StateFile:         valueOr(raw.Watch.StateFile, "/var/lib/osprofiler-tempo-bridge/state.json"),
+			MaxTracesPerPoll:  intOr(raw.Watch.MaxTracesPerPoll, 100),
+			DeleteAfterExport: boolOr(raw.Watch.DeleteAfterExport, true),
+		},
 		Metrics: MetricsConfig{
 			ListenAddr: valueOr(raw.Metrics.ListenAddr, ":9090"),
 			Path:       valueOr(raw.Metrics.Path, "/metrics"),
@@ -119,6 +140,14 @@ func LoadFile(path string) (Config, error) {
 	cfg.OTLP.Timeout, err = parseDurationOr(raw.OTLP.Timeout, 5*time.Second)
 	if err != nil {
 		return Config{}, fmt.Errorf("otlp.timeout: %w", err)
+	}
+	cfg.Watch.PollInterval, err = parseDurationOr(raw.Watch.PollInterval, 30*time.Second)
+	if err != nil {
+		return Config{}, fmt.Errorf("watch.poll_interval: %w", err)
+	}
+	cfg.Watch.ExportDelay, err = parseDurationOr(raw.Watch.ExportDelay, 2*time.Minute)
+	if err != nil {
+		return Config{}, fmt.Errorf("watch.export_delay: %w", err)
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -150,6 +179,18 @@ func (c Config) Validate() error {
 	if c.Bridge.ServiceName == "" {
 		return errors.New("bridge.service_name is required")
 	}
+	if c.Watch.PollInterval <= 0 {
+		return errors.New("watch.poll_interval must be positive")
+	}
+	if c.Watch.ExportDelay < 0 {
+		return errors.New("watch.export_delay must not be negative")
+	}
+	if c.Watch.StateFile == "" {
+		return errors.New("watch.state_file is required")
+	}
+	if c.Watch.MaxTracesPerPoll <= 0 {
+		return errors.New("watch.max_traces_per_poll must be positive")
+	}
 	if c.Metrics.ListenAddr == "" {
 		return errors.New("metrics.listen_addr is required")
 	}
@@ -178,4 +219,11 @@ func boolOr(value *bool, fallback bool) bool {
 		return fallback
 	}
 	return *value
+}
+
+func intOr(value, fallback int) int {
+	if value == 0 {
+		return fallback
+	}
+	return value
 }

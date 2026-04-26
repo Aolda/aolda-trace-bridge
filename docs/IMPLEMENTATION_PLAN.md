@@ -255,7 +255,7 @@ Behavior:
 - Include concise error context: status code, endpoint host, trace count, span count.
 - Assume the configured endpoint is OTel Collector by default. Do not add Collector-specific behavior to the exporter; it should remain generic OTLP HTTP.
 
-MVP does not write a done marker on success. The operator can retry manually by running the same base ID again.
+Single-trace export does not write a done marker. Watch mode records successful exports in a local state file and, when configured, deletes exported OSProfiler Redis keys after the OTLP endpoint accepts the trace.
 
 ## Phase 8: Metrics and Health
 
@@ -342,12 +342,9 @@ Implementation is complete when:
 
 After MVP works, revisit:
 
-- `list_traces` through the helper.
-- Batch export.
-- Periodic polling.
 - Redis-backed done marker.
-- Late-event detection.
-- Duplicate prevention.
+- Multi-worker Redis locks.
+- Completion detection stronger than `watch.export_delay`.
 - Additional OpenTelemetry semantic convention mapping beyond the current project/host resource grouping.
 - HTTP/DB/RPC semantic attributes.
 

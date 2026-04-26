@@ -4,11 +4,14 @@ Planning repository for a bridge that reuses OSProfiler's Python driver/report g
 
 ## Current Status
 
-MVP implementation is present.
+MVP implementation and watch-mode automation are present.
 
-Implemented MVP scope:
+Implemented scope:
 
 - Single `base_id` export.
+- Watch mode that polls OSProfiler trace IDs in bounded batches.
+- Successful watch exports can delete exported OSProfiler Redis keys.
+- Local state file to avoid duplicate export attempts across polls/restarts.
 - Python helper using OSProfiler driver/report generation.
 - Go report JSON to OTLP conversion.
 - OTLP HTTP export to OTel Collector.
@@ -17,11 +20,9 @@ Implemented MVP scope:
 
 Deferred scope:
 
-- Automatic trace discovery.
-- Polling.
-- Batch export.
-- Redis done markers.
 - Late-event handling.
+- Multi-worker Redis locks.
+- HAProxy/API gateway automatic `X-Trace-*` header injection.
 
 ## Document Index
 
@@ -63,3 +64,41 @@ Pull example:
 ```sh
 docker pull ghcr.io/<owner>/<repo>:latest
 ```
+
+## Usage
+
+Export one trace:
+
+```sh
+docker run --rm --network host \
+  -e OSPROFILER_CONNECTION_STRING \
+  -e OTLP_ENDPOINT \
+  ghcr.io/aolda/aolda-trace-bridge:latest \
+  export \
+  --base-id "$BASE_ID" \
+  --config /etc/osprofiler-tempo-bridge/config.yaml
+```
+
+Run continuous polling:
+
+```sh
+docker run --rm --network host \
+  -e OSPROFILER_CONNECTION_STRING \
+  -e OTLP_ENDPOINT \
+  -v osprofiler-tempo-bridge-state:/var/lib/osprofiler-tempo-bridge \
+  ghcr.io/aolda/aolda-trace-bridge:latest \
+  watch \
+  --config /etc/osprofiler-tempo-bridge/config.yaml
+```
+
+Watch mode defaults:
+
+```text
+poll_interval: 30s
+export_delay: 2m
+max_traces_per_poll: 100
+delete_after_export: true
+state_file: /var/lib/osprofiler-tempo-bridge/state.json
+```
+
+`export_delay` avoids exporting and deleting traces that may still be receiving late OSProfiler events. `max_traces_per_poll` keeps each polling cycle bounded so Redis, the helper, and the OTLP endpoint are not flooded. The state file records exported `base_id`s and deletion completion only; full OSProfiler report JSON is not written to disk.

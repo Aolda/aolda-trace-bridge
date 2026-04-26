@@ -18,7 +18,13 @@ bridge:
   redact_db_statement: false
   redact_sensitive_keys: true
 
+watch:
+  poll_interval: "30s"
+  export_delay: "2m"
+  state_file: "/var/lib/osprofiler-tempo-bridge/state.json"
+  max_traces_per_poll: 100
+  delete_after_export: true
+
 metrics:
   listen_addr: ":9090"
   path: "/metrics"
-

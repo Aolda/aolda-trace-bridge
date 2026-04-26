@@ -53,14 +53,15 @@ operator supplies base_id
   -> Tempo
 ```
 
-Future automated flow:
+Watch-mode flow:
 
 ```text
 Go bridge scheduler
   -> helper list_traces()
   -> per-trace get_report(base_id)
-  -> Redis-backed done/state handling
   -> OTLP export
+  -> local exported-state record
+  -> optional Redis-backed trace deletion
 ```
 
 ## Component Boundaries
@@ -74,7 +75,8 @@ Allowed responsibilities:
 - Import OSProfiler Python libraries.
 - Initialize the OSProfiler storage driver.
 - Call `engine.get_report(base_id)`.
-- Later, call `engine.list_traces()` when automatic discovery is added.
+- Call `engine.list_traces()` for watch-mode discovery.
+- Delete Redis-backed trace keys after successful export when requested by Go.
 - Serialize report JSON or structured errors to stdout.
 
 Disallowed responsibilities:
@@ -389,12 +391,10 @@ The previous raw Redis design is deferred, not the MVP path.
 
 Deferred topics:
 
-- Redis `SCAN` for automatic trace discovery.
 - Redis locks for multi-worker processing.
 - Done marker state.
-- Late-event detection.
+- Stronger late-event detection beyond `watch.export_delay`.
 - `LLEN` stability heuristics.
 - Re-export policy.
-- Redis key deletion.
 
-These should be revisited only after the single-trace JSON-to-OTLP path is proven.
+Watch mode now uses OSProfiler driver `list_traces()` for discovery and can delete Redis-backed trace keys after a successful export. These deferred topics should be revisited only after the bounded single-worker watch path is proven.
