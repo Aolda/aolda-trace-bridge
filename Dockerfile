@@ -17,6 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 WORKDIR /app
 COPY requirements.txt /app/requirements.txt
 RUN --mount=type=cache,target=/root/.cache/pip pip install -r /app/requirements.txt
+RUN python -c "from osprofiler.drivers import base; base.get_driver('redis://:pw@127.0.0.1:6379/0', conf={})"
 
 COPY --from=go-build /out/osprofiler-tempo-bridge /usr/local/bin/osprofiler-tempo-bridge
 COPY helper /app/helper

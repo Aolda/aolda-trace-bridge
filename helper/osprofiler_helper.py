@@ -49,7 +49,10 @@ def _get_engine():
 
     from osprofiler.drivers import base
 
-    _ENGINE = base.get_driver(connection_string)
+    # OSProfiler CLI initializes oslo.config before calling the driver. This
+    # helper only reads reports, so pass a plain config object and avoid
+    # requiring OpenStack service config groups inside the bridge container.
+    _ENGINE = base.get_driver(connection_string, conf={})
     return _ENGINE
 
 
