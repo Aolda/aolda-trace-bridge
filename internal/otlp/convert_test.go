@@ -231,6 +231,72 @@ func TestConvertAddsOpenStackRequestIDAttribute(t *testing.T) {
 	}
 }
 
+func TestSyntheticRootUsesOpenStackServiceForMultiProjectTrace(t *testing.T) {
+	rep := report.Report{
+		Info: map[string]any{"name": "total", "started": float64(0), "finished": float64(2)},
+		Children: []report.Node{
+			testWSGINode("nova", "compute-1", "span-1", "base-1"),
+			testWSGINode("neutron", "network-1", "span-2", "base-1"),
+		},
+	}
+
+	result, err := Convert(rep, Options{
+		BaseID:      "251bb5c1-30fb-4b04-a223-4410b831d4d7",
+		ServiceName: "osprofiler-bridge",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var root *tracepb.Span
+	var rootResourceAttrs []*commonpb.KeyValue
+	for _, rs := range result.Request.ResourceSpans {
+		for _, scope := range rs.ScopeSpans {
+			if span := spanByName(scope.Spans, "osprofiler.total"); span != nil {
+				root = span
+				rootResourceAttrs = rs.Resource.Attributes
+			}
+		}
+	}
+	if root == nil {
+		t.Fatal("missing synthetic root span")
+	}
+	if got := attr(rootResourceAttrs, "service.name"); got != "openstack" {
+		t.Fatalf("root service.name = %q, want openstack", got)
+	}
+	if got := attr(rootResourceAttrs, "service.instance.id"); got != "" {
+		t.Fatalf("root service.instance.id = %q, want empty for multi-host trace", got)
+	}
+}
+
+func testWSGINode(project, host, traceID, parentID string) report.Node {
+	return report.Node{
+		TraceID:  traceID,
+		ParentID: parentID,
+		Info: map[string]any{
+			"name":     "wsgi",
+			"project":  project,
+			"service":  "public",
+			"host":     host,
+			"started":  float64(0),
+			"finished": float64(1),
+			"meta.raw_payload.wsgi-start": map[string]any{
+				"timestamp": "2026-04-25T15:30:00.000000",
+				"info": map[string]any{
+					"request": map[string]any{
+						"method": "GET",
+						"path":   "/",
+					},
+				},
+			},
+			"meta.raw_payload.wsgi-stop": map[string]any{
+				"timestamp": "2026-04-25T15:30:00.001000",
+				"info":      map[string]any{},
+			},
+		},
+	}
+}
+
 func spanByName(spans []*tracepb.Span, name string) *tracepb.Span {
 	for _, span := range spans {
 		if span.Name == name {

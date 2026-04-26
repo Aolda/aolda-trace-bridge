@@ -231,7 +231,7 @@ Rules:
 - Synthetic root span name is `osprofiler.total`.
 - Span name: project-qualified operation, with HTTP/SQL summaries when available, for example `keystone.wsgi POST /v3/auth/tokens` or `keystone.db SELECT user`.
 - Start/end: raw payload start/stop timestamps first; relative `started`/`finished` offsets only as fallback.
-- Resource `service.name`: OSProfiler project, for example `keystone`; fallback to config value, default `osprofiler-bridge`.
+- Resource `service.name`: OSProfiler project, for example `keystone`; synthetic root uses `openstack` for multi-project traces; non-root missing project metadata falls back to config value, default `osprofiler-bridge`.
 - Resource `service.namespace`: `openstack`.
 - Resource `service.instance.id`: OSProfiler host when known; spans are grouped by host.
 - Attributes: redacted `osprofiler.info_json` plus selected OSProfiler IDs.

@@ -254,7 +254,7 @@ service.instance.id = <host>, for example "aolda-compute"
 host.name = <host>
 ```
 
-Spans are grouped into separate OTLP `ResourceSpans` when the host differs. The synthetic root span uses the common project when all child spans share one project, and omits `service.instance.id` when the trace spans multiple hosts. If project metadata is missing, `bridge.service_name` is used as the fallback `service.name`.
+Spans are grouped into separate OTLP `ResourceSpans` when the host differs. The synthetic root span uses the common project when all child spans share one project, and uses `service.name = "openstack"` when the trace crosses multiple OpenStack projects or services. It omits `service.instance.id` when the trace spans multiple hosts. If non-root project metadata is missing, `bridge.service_name` is used as the fallback `service.name`.
 
 ## Span Attributes
 

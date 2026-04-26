@@ -119,6 +119,9 @@ func resourceSpans(spans []*tracepb.Span, fallbackServiceName string) []*tracepb
 		if attrValue(span.Attributes, "osprofiler.synthetic_root") == "true" {
 			project = commonProject
 			host = commonHost
+			if project == "" {
+				project = "openstack"
+			}
 		}
 		key := project + "\x00" + host
 		group, ok := groups[key]

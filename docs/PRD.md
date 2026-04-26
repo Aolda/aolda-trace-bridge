@@ -251,6 +251,8 @@ host.name = <host> when known
 fallback service.name = bridge.service_name
 ```
 
+For the synthetic `osprofiler.total` root span, use the common project when all child spans share one project. If the trace crosses multiple OpenStack projects or services, use `service.name = "openstack"` rather than the bridge process name.
+
 Span attributes:
 
 ```text
