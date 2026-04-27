@@ -291,6 +291,63 @@ func TestConvertAddsBareOpenStackRequestIDAttribute(t *testing.T) {
 	}
 }
 
+func TestConvertAddsRequestObjectIDAttribute(t *testing.T) {
+	rep := report.Report{
+		Info: map[string]any{"name": "total", "started": float64(0), "finished": float64(1)},
+		Children: []report.Node{
+			{
+				TraceID:  "span-1",
+				ParentID: "base-1",
+				Info: map[string]any{
+					"name":     "wsgi",
+					"project":  "placement",
+					"service":  "public",
+					"host":     "control-1",
+					"started":  float64(0),
+					"finished": float64(1),
+					"meta.raw_payload.wsgi-start": map[string]any{
+						"timestamp": "2026-04-25T15:30:00.000000",
+						"info": map[string]any{
+							"request": map[string]any{
+								"id":     "19d2242a-f77a-4098-a183-adb30d6d9b58",
+								"method": "GET",
+								"path":   "/",
+							},
+						},
+					},
+					"meta.raw_payload.wsgi-stop": map[string]any{
+						"timestamp": "2026-04-25T15:30:00.001000",
+						"info":      map[string]any{},
+					},
+				},
+			},
+		},
+	}
+
+	result, err := Convert(rep, Options{
+		BaseID:      "251bb5c1-30fb-4b04-a223-4410b831d4d7",
+		ServiceName: "osprofiler-bridge",
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var target *tracepb.Span
+	for _, rs := range result.Request.ResourceSpans {
+		for _, scope := range rs.ScopeSpans {
+			if span := spanByName(scope.Spans, "placement.wsgi GET /"); span != nil {
+				target = span
+			}
+		}
+	}
+	if target == nil {
+		t.Fatal("missing placement wsgi span")
+	}
+	if got := attr(target.Attributes, "openstack.request_id"); got != "19d2242a-f77a-4098-a183-adb30d6d9b58" {
+		t.Fatalf("openstack.request_id = %q", got)
+	}
+}
+
 func TestSyntheticRootUsesOpenStackServiceForMultiProjectTrace(t *testing.T) {
 	rep := report.Report{
 		Info: map[string]any{"name": "total", "started": float64(0), "finished": float64(2)},

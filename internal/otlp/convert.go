@@ -470,8 +470,8 @@ func firstOpenStackRequestID(info map[string]any) string {
 	seen := map[string]bool{}
 	var found string
 
-	var walk func(any, string)
-	walk = func(value any, keyContext string) {
+	var walk func(any, []string)
+	walk = func(value any, keyPath []string) {
 		if found != "" {
 			return
 		}
@@ -479,14 +479,14 @@ func firstOpenStackRequestID(info map[string]any) string {
 		switch typed := value.(type) {
 		case map[string]any:
 			for key, child := range typed {
-				walk(child, key)
+				walk(child, append(keyPath, key))
 				if found != "" {
 					return
 				}
 			}
 		case []any:
 			for _, child := range typed {
-				walk(child, keyContext)
+				walk(child, keyPath)
 				if found != "" {
 					return
 				}
@@ -500,7 +500,7 @@ func firstOpenStackRequestID(info map[string]any) string {
 					return
 				}
 			}
-			if isRequestIDKey(keyContext) {
+			if isRequestIDPath(keyPath) {
 				for _, requestID := range requestIDBareRE.FindAllString(typed, -1) {
 					requestID = normalizeOpenStackRequestID(requestID)
 					if requestID != "" && !seen[requestID] {
@@ -513,12 +513,37 @@ func firstOpenStackRequestID(info map[string]any) string {
 		}
 	}
 
-	walk(info, "")
+	walk(info, nil)
 	return found
 }
 
+func isRequestIDPath(path []string) bool {
+	if len(path) == 0 {
+		return false
+	}
+
+	last := normalizeInfoKey(path[len(path)-1])
+	if isRequestIDKey(last) {
+		return true
+	}
+
+	if last == "id" && len(path) >= 2 {
+		parent := normalizeInfoKey(path[len(path)-2])
+		return parent == "request" || parent == "http_request" || strings.HasSuffix(parent, "_request")
+	}
+
+	return false
+}
+
+func normalizeInfoKey(key string) string {
+	key = strings.ToLower(key)
+	key = strings.ReplaceAll(key, "-", "_")
+	key = strings.ReplaceAll(key, ".", "_")
+	return key
+}
+
 func isRequestIDKey(key string) bool {
-	key = strings.ToLower(strings.ReplaceAll(key, "-", "_"))
+	key = normalizeInfoKey(key)
 	return key == "request_id" ||
 		key == "global_request_id" ||
 		key == "x_openstack_request_id" ||
