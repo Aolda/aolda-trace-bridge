@@ -28,6 +28,7 @@ Deferred scope:
 
 - [Product Requirements](docs/PRD.md): normalized PRD, MVP scope, exclusions, security, and verification.
 - [Architecture Notes](docs/ARCHITECTURE.md): Python helper + Go exporter architecture, helper protocol, OTLP mapping, and deferred automation.
+- [Implementation Log](docs/IMPLEMENTATION_LOG.md): implementation issues, error cases, reasoning, and final resolutions.
 - [Implementation Plan](docs/IMPLEMENTATION_PLAN.md): phased implementation plan for future agents after planning is approved.
 - [Open Questions](docs/OPEN_QUESTIONS.md): decisions still needing owner approval.
 - [Working Workflow](docs/WORKFLOW.md): required discussion, approval, implementation, QA, and reporting loop.
