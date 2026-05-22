@@ -69,6 +69,10 @@ func (c *Client) Start() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	return c.startLocked()
+}
+
+func (c *Client) startLocked() error {
 	if c.cmd != nil {
 		return nil
 	}
@@ -115,8 +119,13 @@ func (c *Client) Close() error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
+	c.closeLocked()
+	return nil
+}
+
+func (c *Client) closeLocked() {
 	if c.cmd == nil {
-		return nil
+		return
 	}
 	_ = c.stdin.Close()
 	if c.cmd.Process != nil {
@@ -126,8 +135,14 @@ func (c *Client) Close() error {
 	case <-c.done:
 	case <-time.After(2 * time.Second):
 	}
+	c.clearLocked()
+}
+
+func (c *Client) clearLocked() {
 	c.cmd = nil
-	return nil
+	c.stdin = nil
+	c.stdout = nil
+	c.done = nil
 }
 
 func (c *Client) GetReport(ctx context.Context, baseID string) (json.RawMessage, error) {
@@ -199,8 +214,8 @@ func (c *Client) request(ctx context.Context, req Request, operation string) (Re
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.cmd == nil {
-		return Response{}, errors.New("helper is not started")
+	if err := c.startLocked(); err != nil {
+		return Response{}, err
 	}
 
 	line, err := json.Marshal(req)
@@ -210,6 +225,7 @@ func (c *Client) request(ctx context.Context, req Request, operation string) (Re
 	line = append(line, '\n')
 
 	if _, err := c.stdin.Write(line); err != nil {
+		c.closeLocked()
 		return Response{}, fmt.Errorf("write helper request: %w%s", err, c.stderrSuffix())
 	}
 
@@ -221,17 +237,17 @@ func (c *Client) request(ctx context.Context, req Request, operation string) (Re
 
 	select {
 	case <-ctx.Done():
-		if c.cmd != nil && c.cmd.Process != nil {
-			_ = c.cmd.Process.Kill()
-		}
+		c.closeLocked()
 		return Response{}, fmt.Errorf("helper %s timed out: %w%s", operation, ctx.Err(), c.stderrSuffix())
 	case err := <-c.done:
 		if err == nil {
 			err = errors.New("helper exited")
 		}
+		c.clearLocked()
 		return Response{}, fmt.Errorf("helper exited before response: %w%s", err, c.stderrSuffix())
 	case result := <-respCh:
 		if result.err != nil {
+			c.closeLocked()
 			return Response{}, result.err
 		}
 		if result.resp.ID != req.ID {
