@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -201,6 +202,102 @@ watch:
 	}
 	if _, err := os.Stat(statePath); err != nil {
 		t.Fatalf("state file was not written: %v", err)
+	}
+}
+
+func TestRunWatchOnceListsTracePageFromSavedCursor(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	helperPath := filepath.Join(tmp, "fake_helper.py")
+	requestPath := filepath.Join(tmp, "list_request.json")
+	if err := os.WriteFile(helperPath, []byte(`
+import json
+import os
+import sys
+
+for line in sys.stdin:
+    req = json.loads(line)
+    method = req.get("method")
+    if method == "list_traces":
+        with open(os.environ["REQUEST_PATH"], "w", encoding="utf-8") as f:
+            json.dump(req, f)
+        print(json.dumps({"id": req["id"], "ok": True, "next_cursor": "9", "traces": []}), flush=True)
+    else:
+        print(json.dumps({"id": req["id"], "ok": False, "error": {"code": "unexpected", "message": method}}), flush=True)
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("REQUEST_PATH", requestPath)
+	t.Setenv("OSPROFILER_CONNECTION_STRING", "redis://:redacted@example:6379/0")
+	t.Setenv("OTLP_ENDPOINT", server.URL)
+
+	statePath := filepath.Join(tmp, "state.json")
+	if err := os.WriteFile(statePath, []byte(`{"exported":{},"scan_cursor":"7"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	configPath := filepath.Join(tmp, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+osprofiler:
+  connection_string: "${OSPROFILER_CONNECTION_STRING}"
+helper:
+  command: ["`+python+`", "`+helperPath+`"]
+otlp:
+  endpoint: "${OTLP_ENDPOINT}"
+watch:
+  export_delay: "0s"
+  state_file: "`+statePath+`"
+  max_traces_per_poll: 10
+  scan_count: 25
+  delete_after_export: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err = run([]string{
+		"watch",
+		"--once",
+		"--config", configPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	var req map[string]any
+	data, err := os.ReadFile(requestPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &req); err != nil {
+		t.Fatal(err)
+	}
+	if req["cursor"] != "7" {
+		t.Fatalf("cursor = %#v, want 7", req["cursor"])
+	}
+	if req["count"] != float64(25) {
+		t.Fatalf("count = %#v, want 25", req["count"])
+	}
+
+	var state map[string]any
+	data, err = os.ReadFile(statePath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := json.Unmarshal(data, &state); err != nil {
+		t.Fatal(err)
+	}
+	if state["scan_cursor"] != "9" {
+		t.Fatalf("scan_cursor = %#v, want 9", state["scan_cursor"])
 	}
 }
 

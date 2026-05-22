@@ -61,6 +61,40 @@ done
 	}
 }
 
+func TestClientListTracePageSendsCursorAndCount(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "fake-helper.py")
+	if err := os.WriteFile(script, []byte(`#!/usr/bin/env python3
+import json
+import sys
+
+for line in sys.stdin:
+    req = json.loads(line)
+    if req.get("cursor") != "7" or req.get("count") != 25:
+        print(json.dumps({"id": "1", "ok": False, "error": {"code": "bad_request", "message": json.dumps(req)}}), flush=True)
+        continue
+    print(json.dumps({"id": "1", "ok": True, "next_cursor": "9", "traces": [{"base_id": "base-1"}]}), flush=True)
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+
+	client := NewClient([]string{script}, "redis://redacted", time.Second)
+	if err := client.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	page, err := client.ListTracePage(context.Background(), "7", 25)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if page.NextCursor != "9" {
+		t.Fatalf("next cursor = %q, want 9", page.NextCursor)
+	}
+	if len(page.Traces) != 1 || page.Traces[0].BaseID != "base-1" {
+		t.Fatalf("unexpected traces: %+v", page.Traces)
+	}
+}
+
 func TestClientDeleteTrace(t *testing.T) {
 	script := filepath.Join(t.TempDir(), "fake-helper.sh")
 	if err := os.WriteFile(script, []byte(`#!/bin/sh

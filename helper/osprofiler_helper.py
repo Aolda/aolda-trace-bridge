@@ -75,11 +75,17 @@ def _handle(request):
 
     if method == "list_traces":
         try:
-            traces = engine.list_traces(fields={"base_id", "timestamp"})
+            cursor = request.get("cursor", "0")
+            count = request.get("count", 0)
+            traces, next_cursor = _list_trace_page(engine, cursor, count)
         except Exception as exc:
             _print_exception("list_traces failed")
             return _response_error(request_id, "list_traces_failed", _redact_message(exc))
-        return _response_ok(request_id, traces=[_normalize_trace(t) for t in traces or []])
+        return _response_ok(
+            request_id,
+            traces=[_normalize_trace(t) for t in traces or []],
+            next_cursor=str(next_cursor),
+        )
 
     base_id = request.get("base_id")
     if not base_id:
@@ -140,6 +146,74 @@ def _delete_trace(engine, base_id):
     if not keys:
         return 0
     return int(db.delete(*keys))
+
+
+def _list_trace_page(engine, cursor, count):
+    db = getattr(engine, "db", None)
+    if db is None:
+        traces = engine.list_traces(fields={"base_id", "timestamp"})
+        return traces or [], "0"
+
+    namespace_opt = getattr(engine, "namespace_opt", "osprofiler_opt:")
+    cursor = _normalize_cursor(cursor)
+    count = _normalize_count(count)
+    next_cursor, keys = db.scan(cursor=cursor, match=namespace_opt + "*", count=count)
+
+    traces = []
+    for key in keys:
+        key_text = _decode(key)
+        if not key_text.startswith(namespace_opt):
+            continue
+        base_id = key_text[len(namespace_opt):]
+        if not base_id:
+            continue
+        traces.append({
+            "base_id": base_id,
+            "timestamp": _latest_trace_timestamp(db, key),
+        })
+    return traces, next_cursor
+
+
+def _latest_trace_timestamp(db, key):
+    try:
+        raw = db.lindex(key, 0)
+    except Exception:
+        return None
+    if raw is None:
+        return None
+    try:
+        event = json.loads(_decode(raw))
+    except Exception:
+        return None
+    timestamp = event.get("timestamp")
+    if timestamp is None:
+        return None
+    return str(timestamp)
+
+
+def _normalize_cursor(cursor):
+    if cursor in (None, ""):
+        return 0
+    try:
+        return int(cursor)
+    except Exception:
+        return 0
+
+
+def _normalize_count(count):
+    try:
+        count = int(count)
+    except Exception:
+        count = 1000
+    if count <= 0:
+        return 1000
+    return count
+
+
+def _decode(value):
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    return str(value)
 
 
 def _normalize_trace(trace):
