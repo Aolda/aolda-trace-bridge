@@ -45,6 +45,7 @@ type WatchConfig struct {
 	ExportDelay       time.Duration
 	StateFile         string
 	MaxTracesPerPoll  int
+	ScanCount         int
 	DeleteAfterExport bool
 }
 
@@ -77,6 +78,7 @@ type rawConfig struct {
 		ExportDelay       string `yaml:"export_delay"`
 		StateFile         string `yaml:"state_file"`
 		MaxTracesPerPoll  int    `yaml:"max_traces_per_poll"`
+		ScanCount         int    `yaml:"scan_count"`
 		DeleteAfterExport *bool  `yaml:"delete_after_export"`
 	} `yaml:"watch"`
 	Metrics struct {
@@ -121,6 +123,7 @@ func LoadFile(path string) (Config, error) {
 		Watch: WatchConfig{
 			StateFile:         valueOr(raw.Watch.StateFile, "/var/lib/osprofiler-tempo-bridge/state.json"),
 			MaxTracesPerPoll:  intOr(raw.Watch.MaxTracesPerPoll, 100),
+			ScanCount:         intOr(raw.Watch.ScanCount, 1000),
 			DeleteAfterExport: boolOr(raw.Watch.DeleteAfterExport, true),
 		},
 		Metrics: MetricsConfig{
@@ -190,6 +193,9 @@ func (c Config) Validate() error {
 	}
 	if c.Watch.MaxTracesPerPoll <= 0 {
 		return errors.New("watch.max_traces_per_poll must be positive")
+	}
+	if c.Watch.ScanCount <= 0 {
+		return errors.New("watch.scan_count must be positive")
 	}
 	if c.Metrics.ListenAddr == "" {
 		return errors.New("metrics.listen_addr is required")

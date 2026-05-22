@@ -164,10 +164,14 @@ func exportTrace(ctx context.Context, client *helper.Client, exp exporter.Export
 }
 
 func pollAndExport(ctx context.Context, client *helper.Client, exp exporter.Exporter, store *state.Store, cfg config.Config) error {
-	traces, err := client.ListTraces(ctx)
+	page, err := client.ListTracePage(ctx, store.Data.ScanCursor, cfg.Watch.ScanCount)
 	if err != nil {
 		return err
 	}
+	if err := store.SetScanCursor(page.NextCursor); err != nil {
+		return err
+	}
+	traces := page.Traces
 
 	remaining := cfg.Watch.MaxTracesPerPoll
 	if cfg.Watch.DeleteAfterExport {

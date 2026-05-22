@@ -32,15 +32,18 @@ type Request struct {
 	ID     string `json:"id"`
 	Method string `json:"method"`
 	BaseID string `json:"base_id,omitempty"`
+	Cursor string `json:"cursor,omitempty"`
+	Count  int    `json:"count,omitempty"`
 }
 
 type Response struct {
-	ID      string          `json:"id"`
-	OK      bool            `json:"ok"`
-	Report  json.RawMessage `json:"report,omitempty"`
-	Traces  []TraceSummary  `json:"traces,omitempty"`
-	Deleted int             `json:"deleted,omitempty"`
-	Error   *ResponseError  `json:"error,omitempty"`
+	ID         string          `json:"id"`
+	OK         bool            `json:"ok"`
+	Report     json.RawMessage `json:"report,omitempty"`
+	Traces     []TraceSummary  `json:"traces,omitempty"`
+	NextCursor string          `json:"next_cursor,omitempty"`
+	Deleted    int             `json:"deleted,omitempty"`
+	Error      *ResponseError  `json:"error,omitempty"`
 }
 
 type TraceSummary struct {
@@ -146,14 +149,29 @@ func (c *Client) GetReport(ctx context.Context, baseID string) (json.RawMessage,
 }
 
 func (c *Client) ListTraces(ctx context.Context) ([]TraceSummary, error) {
-	resp, err := c.request(ctx, Request{
-		ID:     "1",
-		Method: "list_traces",
-	}, "list_traces")
+	page, err := c.ListTracePage(ctx, "", 0)
 	if err != nil {
 		return nil, err
 	}
-	return resp.Traces, nil
+	return page.Traces, nil
+}
+
+type TracePage struct {
+	Traces     []TraceSummary
+	NextCursor string
+}
+
+func (c *Client) ListTracePage(ctx context.Context, cursor string, count int) (TracePage, error) {
+	resp, err := c.request(ctx, Request{
+		ID:     "1",
+		Method: "list_traces",
+		Cursor: cursor,
+		Count:  count,
+	}, "list_traces")
+	if err != nil {
+		return TracePage{}, err
+	}
+	return TracePage{Traces: resp.Traces, NextCursor: resp.NextCursor}, nil
 }
 
 func (c *Client) DeleteTrace(ctx context.Context, baseID string) (int, error) {

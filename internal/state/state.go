@@ -15,7 +15,8 @@ type Store struct {
 }
 
 type Data struct {
-	Exported map[string]Record `json:"exported"`
+	Exported   map[string]Record `json:"exported"`
+	ScanCursor string            `json:"scan_cursor,omitempty"`
 }
 
 type Record struct {
@@ -86,6 +87,11 @@ func (s *Store) MarkDeleted(baseID string, deleted int) error {
 	record.DeletedAt = &now
 	record.Deleted = deleted
 	s.Data.Exported[baseID] = record
+	return s.Save()
+}
+
+func (s *Store) SetScanCursor(cursor string) error {
+	s.Data.ScanCursor = cursor
 	return s.Save()
 }
 

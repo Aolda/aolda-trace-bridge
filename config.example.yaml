@@ -23,6 +23,7 @@ watch:
   export_delay: "2m"
   state_file: "/var/lib/osprofiler-tempo-bridge/state.json"
   max_traces_per_poll: 100
+  scan_count: 1000
   delete_after_export: true
 
 metrics:

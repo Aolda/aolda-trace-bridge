@@ -42,3 +42,23 @@ func TestStoreMarkAndLoadExported(t *testing.T) {
 		t.Fatalf("deleted = %d, want 2", got)
 	}
 }
+
+func TestStorePersistsScanCursor(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	store, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := store.SetScanCursor("42"); err != nil {
+		t.Fatal(err)
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if loaded.Data.ScanCursor != "42" {
+		t.Fatalf("scan cursor = %q, want 42", loaded.Data.ScanCursor)
+	}
+}
