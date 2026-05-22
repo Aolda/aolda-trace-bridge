@@ -140,3 +140,51 @@ done
 		t.Fatal("expected malformed response error")
 	}
 }
+
+func TestClientRestartsHelperAfterTimeout(t *testing.T) {
+	script := filepath.Join(t.TempDir(), "fake-helper.py")
+	countPath := filepath.Join(t.TempDir(), "count")
+	if err := os.WriteFile(script, []byte(`#!/usr/bin/env python3
+import json
+import os
+import sys
+import time
+
+count_path = os.environ["COUNT_PATH"]
+try:
+    with open(count_path, "r", encoding="utf-8") as f:
+        count = int(f.read())
+except Exception:
+    count = 0
+count += 1
+with open(count_path, "w", encoding="utf-8") as f:
+    f.write(str(count))
+
+for line in sys.stdin:
+    req = json.loads(line)
+    if count == 1:
+        time.sleep(1)
+    print(json.dumps({"id": req["id"], "ok": True, "traces": [{"base_id": "base-1"}]}), flush=True)
+`), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("COUNT_PATH", countPath)
+
+	client := NewClient([]string{script}, "redis://redacted", 200*time.Millisecond)
+	if err := client.Start(); err != nil {
+		t.Fatal(err)
+	}
+	defer client.Close()
+
+	if _, err := client.ListTraces(context.Background()); err == nil {
+		t.Fatal("expected first helper request to time out")
+	}
+
+	traces, err := client.ListTraces(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(traces) != 1 || traces[0].BaseID != "base-1" {
+		t.Fatalf("unexpected traces after restart: %+v", traces)
+	}
+}
