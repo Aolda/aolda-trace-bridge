@@ -211,6 +211,43 @@ func (c *Client) request(ctx context.Context, req Request, operation string) (Re
 		defer cancel()
 	}
 
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		resp, err := c.requestOnce(ctx, req, operation)
+		if err == nil {
+			return resp, nil
+		}
+		if !errors.Is(err, errHelperTransport) || ctx.Err() != nil {
+			return Response{}, err
+		}
+		lastErr = err
+	}
+	return Response{}, lastErr
+}
+
+var errHelperTransport = errors.New("helper transport error")
+
+type helperTransportError struct {
+	err error
+}
+
+func (e helperTransportError) Error() string {
+	return e.err.Error()
+}
+
+func (e helperTransportError) Unwrap() error {
+	return e.err
+}
+
+func (e helperTransportError) Is(target error) bool {
+	return target == errHelperTransport
+}
+
+func retryableHelperError(err error) error {
+	return helperTransportError{err: err}
+}
+
+func (c *Client) requestOnce(ctx context.Context, req Request, operation string) (Response, error) {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
@@ -226,7 +263,7 @@ func (c *Client) request(ctx context.Context, req Request, operation string) (Re
 
 	if _, err := c.stdin.Write(line); err != nil {
 		c.closeLocked()
-		return Response{}, fmt.Errorf("write helper request: %w%s", err, c.stderrSuffix())
+		return Response{}, retryableHelperError(fmt.Errorf("write helper request: %w%s", err, c.stderrSuffix()))
 	}
 
 	respCh := make(chan responseResult, 1)
@@ -238,17 +275,17 @@ func (c *Client) request(ctx context.Context, req Request, operation string) (Re
 	select {
 	case <-ctx.Done():
 		c.closeLocked()
-		return Response{}, fmt.Errorf("helper %s timed out: %w%s", operation, ctx.Err(), c.stderrSuffix())
+		return Response{}, retryableHelperError(fmt.Errorf("helper %s timed out: %w%s", operation, ctx.Err(), c.stderrSuffix()))
 	case err := <-c.done:
 		if err == nil {
 			err = errors.New("helper exited")
 		}
 		c.clearLocked()
-		return Response{}, fmt.Errorf("helper exited before response: %w%s", err, c.stderrSuffix())
+		return Response{}, retryableHelperError(fmt.Errorf("helper exited before response: %w%s", err, c.stderrSuffix()))
 	case result := <-respCh:
 		if result.err != nil {
 			c.closeLocked()
-			return Response{}, result.err
+			return Response{}, retryableHelperError(result.err)
 		}
 		if result.resp.ID != req.ID {
 			return Response{}, fmt.Errorf("helper response id mismatch: got %q want %q", result.resp.ID, req.ID)
