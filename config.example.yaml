@@ -5,7 +5,7 @@ helper:
   command:
     - "python3"
     - "/app/helper/osprofiler_helper.py"
-  request_timeout: "10s"
+  request_timeout: "60s"
   startup_timeout: "5s"
 
 otlp:
@@ -23,7 +23,7 @@ watch:
   export_delay: "2m"
   state_file: "/var/lib/osprofiler-tempo-bridge/state.json"
   max_traces_per_poll: 100
-  scan_count: 1000
+  scan_count: 100
   delete_after_export: true
 
 metrics:

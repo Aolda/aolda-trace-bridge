@@ -44,7 +44,7 @@ otlp:
 	if !cfg.Bridge.RedactSensitiveKeys {
 		t.Fatal("redact_sensitive_keys should default true")
 	}
-	if cfg.Helper.RequestTimeout != 10*time.Second {
+	if cfg.Helper.RequestTimeout != 60*time.Second {
 		t.Fatalf("unexpected request timeout: %s", cfg.Helper.RequestTimeout)
 	}
 	if cfg.Watch.PollInterval != 30*time.Second {
@@ -58,6 +58,9 @@ otlp:
 	}
 	if cfg.Watch.MaxTracesPerPoll != 100 {
 		t.Fatalf("unexpected max traces per poll: %d", cfg.Watch.MaxTracesPerPoll)
+	}
+	if cfg.Watch.ScanCount != 100 {
+		t.Fatalf("unexpected scan count: %d", cfg.Watch.ScanCount)
 	}
 	if !cfg.Watch.DeleteAfterExport {
 		t.Fatal("delete_after_export should default true")
@@ -78,6 +81,7 @@ watch:
   export_delay: "2m"
   state_file: "/tmp/state.json"
   max_traces_per_poll: 7
+  scan_count: 25
   delete_after_export: false
 `), 0o600)
 	if err != nil {
@@ -99,6 +103,9 @@ watch:
 	}
 	if cfg.Watch.MaxTracesPerPoll != 7 {
 		t.Fatalf("max traces per poll = %d", cfg.Watch.MaxTracesPerPoll)
+	}
+	if cfg.Watch.ScanCount != 25 {
+		t.Fatalf("scan count = %d", cfg.Watch.ScanCount)
 	}
 	if cfg.Watch.DeleteAfterExport {
 		t.Fatal("delete_after_export should be false")
