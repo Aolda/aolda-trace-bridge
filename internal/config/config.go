@@ -123,7 +123,7 @@ func LoadFile(path string) (Config, error) {
 		Watch: WatchConfig{
 			StateFile:         valueOr(raw.Watch.StateFile, "/var/lib/osprofiler-tempo-bridge/state.json"),
 			MaxTracesPerPoll:  intOr(raw.Watch.MaxTracesPerPoll, 100),
-			ScanCount:         intOr(raw.Watch.ScanCount, 1000),
+			ScanCount:         intOr(raw.Watch.ScanCount, 100),
 			DeleteAfterExport: boolOr(raw.Watch.DeleteAfterExport, true),
 		},
 		Metrics: MetricsConfig{
@@ -132,7 +132,7 @@ func LoadFile(path string) (Config, error) {
 		},
 	}
 
-	cfg.Helper.RequestTimeout, err = parseDurationOr(raw.Helper.RequestTimeout, 10*time.Second)
+	cfg.Helper.RequestTimeout, err = parseDurationOr(raw.Helper.RequestTimeout, 60*time.Second)
 	if err != nil {
 		return Config{}, fmt.Errorf("helper.request_timeout: %w", err)
 	}
