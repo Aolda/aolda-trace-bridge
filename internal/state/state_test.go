@@ -3,6 +3,7 @@ package state
 import (
 	"path/filepath"
 	"testing"
+	"time"
 )
 
 func TestStoreMarkAndLoadExported(t *testing.T) {
@@ -60,5 +61,37 @@ func TestStorePersistsScanCursor(t *testing.T) {
 	}
 	if loaded.Data.ScanCursor != "42" {
 		t.Fatalf("scan cursor = %q, want 42", loaded.Data.ScanCursor)
+	}
+}
+
+func TestStoreMarksFailedExportAndBacksOffRetry(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "state.json")
+
+	store, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	now := time.Date(2026, 5, 23, 12, 0, 0, 0, time.UTC)
+	if err := store.MarkExportFailed("base-1", "helper get_report timed out", now, 30*time.Minute, 3); err != nil {
+		t.Fatal(err)
+	}
+	if store.CanRetryExport("base-1", now.Add(10*time.Minute)) {
+		t.Fatal("base-1 should be in retry backoff")
+	}
+	if !store.CanRetryExport("base-1", now.Add(31*time.Minute)) {
+		t.Fatal("base-1 should be retryable after backoff")
+	}
+
+	loaded, err := Load(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	failed := loaded.Data.Failed["base-1"]
+	if failed.Attempts != 1 {
+		t.Fatalf("attempts = %d, want 1", failed.Attempts)
+	}
+	if failed.LastError != "helper get_report timed out" {
+		t.Fatalf("last error = %q", failed.LastError)
 	}
 }

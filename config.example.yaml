@@ -24,6 +24,8 @@ watch:
   state_file: "/var/lib/osprofiler-tempo-bridge/state.json"
   max_traces_per_poll: 100
   scan_count: 100
+  failed_retry_interval: "30m"
+  max_export_attempts: 3
   delete_after_export: true
 
 metrics:

@@ -41,12 +41,14 @@ type BridgeConfig struct {
 }
 
 type WatchConfig struct {
-	PollInterval      time.Duration
-	ExportDelay       time.Duration
-	StateFile         string
-	MaxTracesPerPoll  int
-	ScanCount         int
-	DeleteAfterExport bool
+	PollInterval        time.Duration
+	ExportDelay         time.Duration
+	StateFile           string
+	MaxTracesPerPoll    int
+	ScanCount           int
+	FailedRetryInterval time.Duration
+	MaxExportAttempts   int
+	DeleteAfterExport   bool
 }
 
 type MetricsConfig struct {
@@ -74,12 +76,14 @@ type rawConfig struct {
 		RedactSensitiveKeys *bool  `yaml:"redact_sensitive_keys"`
 	} `yaml:"bridge"`
 	Watch struct {
-		PollInterval      string `yaml:"poll_interval"`
-		ExportDelay       string `yaml:"export_delay"`
-		StateFile         string `yaml:"state_file"`
-		MaxTracesPerPoll  int    `yaml:"max_traces_per_poll"`
-		ScanCount         int    `yaml:"scan_count"`
-		DeleteAfterExport *bool  `yaml:"delete_after_export"`
+		PollInterval        string `yaml:"poll_interval"`
+		ExportDelay         string `yaml:"export_delay"`
+		StateFile           string `yaml:"state_file"`
+		MaxTracesPerPoll    int    `yaml:"max_traces_per_poll"`
+		ScanCount           int    `yaml:"scan_count"`
+		FailedRetryInterval string `yaml:"failed_retry_interval"`
+		MaxExportAttempts   int    `yaml:"max_export_attempts"`
+		DeleteAfterExport   *bool  `yaml:"delete_after_export"`
 	} `yaml:"watch"`
 	Metrics struct {
 		ListenAddr string `yaml:"listen_addr"`
@@ -124,6 +128,7 @@ func LoadFile(path string) (Config, error) {
 			StateFile:         valueOr(raw.Watch.StateFile, "/var/lib/osprofiler-tempo-bridge/state.json"),
 			MaxTracesPerPoll:  intOr(raw.Watch.MaxTracesPerPoll, 100),
 			ScanCount:         intOr(raw.Watch.ScanCount, 100),
+			MaxExportAttempts: intOr(raw.Watch.MaxExportAttempts, 3),
 			DeleteAfterExport: boolOr(raw.Watch.DeleteAfterExport, true),
 		},
 		Metrics: MetricsConfig{
@@ -151,6 +156,10 @@ func LoadFile(path string) (Config, error) {
 	cfg.Watch.ExportDelay, err = parseDurationOr(raw.Watch.ExportDelay, 2*time.Minute)
 	if err != nil {
 		return Config{}, fmt.Errorf("watch.export_delay: %w", err)
+	}
+	cfg.Watch.FailedRetryInterval, err = parseDurationOr(raw.Watch.FailedRetryInterval, 30*time.Minute)
+	if err != nil {
+		return Config{}, fmt.Errorf("watch.failed_retry_interval: %w", err)
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -196,6 +205,12 @@ func (c Config) Validate() error {
 	}
 	if c.Watch.ScanCount <= 0 {
 		return errors.New("watch.scan_count must be positive")
+	}
+	if c.Watch.FailedRetryInterval < 0 {
+		return errors.New("watch.failed_retry_interval must not be negative")
+	}
+	if c.Watch.MaxExportAttempts < 0 {
+		return errors.New("watch.max_export_attempts must not be negative")
 	}
 	if c.Metrics.ListenAddr == "" {
 		return errors.New("metrics.listen_addr is required")

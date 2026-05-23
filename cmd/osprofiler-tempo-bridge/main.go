@@ -181,7 +181,8 @@ func pollAndExport(ctx context.Context, client *helper.Client, exp exporter.Expo
 		}
 	}
 
-	traces = eligibleTraces(traces, store, cfg.Watch.ExportDelay, time.Now().UTC())
+	now := time.Now().UTC()
+	traces = eligibleTraces(traces, store, cfg.Watch.ExportDelay, now)
 	if len(traces) > remaining {
 		traces = traces[:remaining]
 	}
@@ -194,6 +195,9 @@ func pollAndExport(ctx context.Context, client *helper.Client, exp exporter.Expo
 		spanCount, err := exportTrace(ctx, client, exp, trace.BaseID, cfg)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "watch export_failed base_id=%s error=%v\n", trace.BaseID, err)
+			if stateErr := store.MarkExportFailed(trace.BaseID, err.Error(), time.Now().UTC(), cfg.Watch.FailedRetryInterval, cfg.Watch.MaxExportAttempts); stateErr != nil {
+				fmt.Fprintf(os.Stderr, "watch state_failed base_id=%s error=%v\n", trace.BaseID, stateErr)
+			}
 			continue
 		}
 
@@ -253,7 +257,7 @@ func eligibleTraces(traces []helper.TraceSummary, store *state.Store, exportDela
 	seen := map[string]bool{}
 	var out []helper.TraceSummary
 	for _, trace := range traces {
-		if trace.BaseID == "" || seen[trace.BaseID] || store.IsExported(trace.BaseID) {
+		if trace.BaseID == "" || seen[trace.BaseID] || store.IsExported(trace.BaseID) || !store.CanRetryExport(trace.BaseID, now) {
 			continue
 		}
 		seen[trace.BaseID] = true
