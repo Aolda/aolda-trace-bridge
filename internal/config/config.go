@@ -43,6 +43,7 @@ type BridgeConfig struct {
 type WatchConfig struct {
 	PollInterval        time.Duration
 	ExportDelay         time.Duration
+	MaxTraceAge         time.Duration
 	StateFile           string
 	MaxTracesPerPoll    int
 	ScanCount           int
@@ -78,6 +79,7 @@ type rawConfig struct {
 	Watch struct {
 		PollInterval        string `yaml:"poll_interval"`
 		ExportDelay         string `yaml:"export_delay"`
+		MaxTraceAge         string `yaml:"max_trace_age"`
 		StateFile           string `yaml:"state_file"`
 		MaxTracesPerPoll    int    `yaml:"max_traces_per_poll"`
 		ScanCount           int    `yaml:"scan_count"`
@@ -157,6 +159,10 @@ func LoadFile(path string) (Config, error) {
 	if err != nil {
 		return Config{}, fmt.Errorf("watch.export_delay: %w", err)
 	}
+	cfg.Watch.MaxTraceAge, err = parseDurationOr(raw.Watch.MaxTraceAge, 24*time.Hour)
+	if err != nil {
+		return Config{}, fmt.Errorf("watch.max_trace_age: %w", err)
+	}
 	cfg.Watch.FailedRetryInterval, err = parseDurationOr(raw.Watch.FailedRetryInterval, 30*time.Minute)
 	if err != nil {
 		return Config{}, fmt.Errorf("watch.failed_retry_interval: %w", err)
@@ -196,6 +202,9 @@ func (c Config) Validate() error {
 	}
 	if c.Watch.ExportDelay < 0 {
 		return errors.New("watch.export_delay must not be negative")
+	}
+	if c.Watch.MaxTraceAge < 0 {
+		return errors.New("watch.max_trace_age must not be negative")
 	}
 	if c.Watch.StateFile == "" {
 		return errors.New("watch.state_file is required")

@@ -53,6 +53,9 @@ otlp:
 	if cfg.Watch.ExportDelay != 2*time.Minute {
 		t.Fatalf("unexpected watch export delay: %s", cfg.Watch.ExportDelay)
 	}
+	if cfg.Watch.MaxTraceAge != 24*time.Hour {
+		t.Fatalf("unexpected max trace age: %s", cfg.Watch.MaxTraceAge)
+	}
 	if cfg.Watch.StateFile != "/var/lib/osprofiler-tempo-bridge/state.json" {
 		t.Fatalf("unexpected watch state file: %q", cfg.Watch.StateFile)
 	}
@@ -85,6 +88,7 @@ otlp:
 watch:
   poll_interval: "5s"
   export_delay: "2m"
+  max_trace_age: "6h"
   state_file: "/tmp/state.json"
   max_traces_per_poll: 7
   scan_count: 25
@@ -105,6 +109,9 @@ watch:
 	}
 	if cfg.Watch.ExportDelay != 2*time.Minute {
 		t.Fatalf("export delay = %s", cfg.Watch.ExportDelay)
+	}
+	if cfg.Watch.MaxTraceAge != 6*time.Hour {
+		t.Fatalf("max trace age = %s", cfg.Watch.MaxTraceAge)
 	}
 	if cfg.Watch.StateFile != "/tmp/state.json" {
 		t.Fatalf("state file = %q", cfg.Watch.StateFile)

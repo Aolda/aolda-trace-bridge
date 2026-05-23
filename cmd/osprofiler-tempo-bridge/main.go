@@ -182,7 +182,7 @@ func pollAndExport(ctx context.Context, client *helper.Client, exp exporter.Expo
 	}
 
 	now := time.Now().UTC()
-	traces = eligibleTraces(traces, store, cfg.Watch.ExportDelay, now)
+	traces = eligibleTraces(traces, store, cfg.Watch.ExportDelay, cfg.Watch.MaxTraceAge, now)
 	if len(traces) > remaining {
 		traces = traces[:remaining]
 	}
@@ -253,7 +253,7 @@ func retryPendingDeletes(ctx context.Context, client *helper.Client, store *stat
 	return remaining
 }
 
-func eligibleTraces(traces []helper.TraceSummary, store *state.Store, exportDelay time.Duration, now time.Time) []helper.TraceSummary {
+func eligibleTraces(traces []helper.TraceSummary, store *state.Store, exportDelay time.Duration, maxTraceAge time.Duration, now time.Time) []helper.TraceSummary {
 	seen := map[string]bool{}
 	var out []helper.TraceSummary
 	for _, trace := range traces {
@@ -262,10 +262,15 @@ func eligibleTraces(traces []helper.TraceSummary, store *state.Store, exportDela
 		}
 		seen[trace.BaseID] = true
 
-		if trace.Timestamp != "" && exportDelay > 0 {
+		if trace.Timestamp != "" && (exportDelay > 0 || maxTraceAge > 0) {
 			timestamp, err := otlp.ParseTimestamp(trace.Timestamp)
-			if err == nil && timestamp.After(now.Add(-exportDelay)) {
-				continue
+			if err == nil {
+				if timestamp.After(now.Add(-exportDelay)) {
+					continue
+				}
+				if maxTraceAge > 0 && timestamp.Before(now.Add(-maxTraceAge)) {
+					continue
+				}
 			}
 		}
 		out = append(out, trace)

@@ -176,6 +176,7 @@ otlp:
   endpoint: "${OTLP_ENDPOINT}"
 watch:
   export_delay: "0s"
+  max_trace_age: "0s"
   state_file: "`+statePath+`"
   max_traces_per_poll: 10
   delete_after_export: true
@@ -385,6 +386,76 @@ watch:
 	}
 	if _, err := os.Stat(getReportPath); !os.IsNotExist(err) {
 		t.Fatalf("get_report was called for trace in backoff")
+	}
+}
+
+func TestRunWatchOnceSkipsTraceOlderThanMaxTraceAge(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("otlp server should not receive stale trace")
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	helperPath := filepath.Join(tmp, "fake_helper.py")
+	getReportPath := filepath.Join(tmp, "get_report_called")
+	if err := os.WriteFile(helperPath, []byte(`
+import json
+import os
+import sys
+
+for line in sys.stdin:
+    req = json.loads(line)
+    method = req.get("method")
+    if method == "list_traces":
+        print(json.dumps({"id": req["id"], "ok": True, "next_cursor": "0", "traces": [{"base_id": "old-base", "timestamp": "2020-01-01T00:00:00.000000"}]}), flush=True)
+    elif method == "get_report":
+        with open(os.environ["GET_REPORT_PATH"], "w", encoding="utf-8") as f:
+            f.write(req.get("base_id", ""))
+        print(json.dumps({"id": req["id"], "ok": False, "error": {"code": "unexpected", "message": "get_report should be skipped"}}), flush=True)
+    else:
+        print(json.dumps({"id": req["id"], "ok": False, "error": {"code": "unexpected", "message": method}}), flush=True)
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GET_REPORT_PATH", getReportPath)
+	t.Setenv("OSPROFILER_CONNECTION_STRING", "redis://:redacted@example:6379/0")
+	t.Setenv("OTLP_ENDPOINT", server.URL)
+
+	statePath := filepath.Join(tmp, "state.json")
+	configPath := filepath.Join(tmp, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+osprofiler:
+  connection_string: "${OSPROFILER_CONNECTION_STRING}"
+helper:
+  command: ["`+python+`", "`+helperPath+`"]
+otlp:
+  endpoint: "${OTLP_ENDPOINT}"
+watch:
+  export_delay: "0s"
+  max_trace_age: "24h"
+  state_file: "`+statePath+`"
+  max_traces_per_poll: 10
+  delete_after_export: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err = run([]string{
+		"watch",
+		"--once",
+		"--config", configPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(getReportPath); !os.IsNotExist(err) {
+		t.Fatalf("get_report was called for stale trace")
 	}
 }
 
