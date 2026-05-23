@@ -15,8 +15,9 @@ type Store struct {
 }
 
 type Data struct {
-	Exported   map[string]Record `json:"exported"`
-	ScanCursor string            `json:"scan_cursor,omitempty"`
+	Exported   map[string]Record  `json:"exported"`
+	Failed     map[string]Failure `json:"failed,omitempty"`
+	ScanCursor string             `json:"scan_cursor,omitempty"`
 }
 
 type Record struct {
@@ -26,13 +27,21 @@ type Record struct {
 	Deleted    int        `json:"deleted,omitempty"`
 }
 
+type Failure struct {
+	Attempts     int       `json:"attempts"`
+	LastError    string    `json:"last_error"`
+	LastFailedAt time.Time `json:"last_failed_at"`
+	NextRetryAt  time.Time `json:"next_retry_at"`
+	GiveUp       bool      `json:"give_up,omitempty"`
+}
+
 func Load(path string) (*Store, error) {
 	if path == "" {
 		return nil, errors.New("state path is required")
 	}
 	store := &Store{
 		path: path,
-		Data: Data{Exported: map[string]Record{}},
+		Data: Data{Exported: map[string]Record{}, Failed: map[string]Failure{}},
 	}
 
 	data, err := os.ReadFile(path)
@@ -50,6 +59,9 @@ func Load(path string) (*Store, error) {
 	}
 	if store.Data.Exported == nil {
 		store.Data.Exported = map[string]Record{}
+	}
+	if store.Data.Failed == nil {
+		store.Data.Failed = map[string]Failure{}
 	}
 	return store, nil
 }
@@ -72,6 +84,40 @@ func (s *Store) MarkExported(baseID string, spanCount int) error {
 	record.ExportedAt = time.Now().UTC()
 	record.SpanCount = spanCount
 	s.Data.Exported[baseID] = record
+	delete(s.Data.Failed, baseID)
+	return s.Save()
+}
+
+func (s *Store) CanRetryExport(baseID string, now time.Time) bool {
+	if baseID == "" {
+		return false
+	}
+	failure, ok := s.Data.Failed[baseID]
+	if !ok {
+		return true
+	}
+	if failure.GiveUp {
+		return false
+	}
+	return !now.Before(failure.NextRetryAt)
+}
+
+func (s *Store) MarkExportFailed(baseID string, message string, now time.Time, retryInterval time.Duration, maxAttempts int) error {
+	if baseID == "" {
+		return errors.New("base_id is required")
+	}
+	if retryInterval < 0 {
+		retryInterval = 0
+	}
+	failure := s.Data.Failed[baseID]
+	failure.Attempts++
+	failure.LastError = message
+	failure.LastFailedAt = now.UTC()
+	failure.NextRetryAt = now.Add(retryInterval).UTC()
+	if maxAttempts > 0 && failure.Attempts >= maxAttempts {
+		failure.GiveUp = true
+	}
+	s.Data.Failed[baseID] = failure
 	return s.Save()
 }
 

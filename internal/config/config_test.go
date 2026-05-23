@@ -62,6 +62,12 @@ otlp:
 	if cfg.Watch.ScanCount != 100 {
 		t.Fatalf("unexpected scan count: %d", cfg.Watch.ScanCount)
 	}
+	if cfg.Watch.FailedRetryInterval != 30*time.Minute {
+		t.Fatalf("unexpected failed retry interval: %s", cfg.Watch.FailedRetryInterval)
+	}
+	if cfg.Watch.MaxExportAttempts != 3 {
+		t.Fatalf("unexpected max export attempts: %d", cfg.Watch.MaxExportAttempts)
+	}
 	if !cfg.Watch.DeleteAfterExport {
 		t.Fatal("delete_after_export should default true")
 	}
@@ -82,6 +88,8 @@ watch:
   state_file: "/tmp/state.json"
   max_traces_per_poll: 7
   scan_count: 25
+  failed_retry_interval: "5m"
+  max_export_attempts: 9
   delete_after_export: false
 `), 0o600)
 	if err != nil {
@@ -106,6 +114,12 @@ watch:
 	}
 	if cfg.Watch.ScanCount != 25 {
 		t.Fatalf("scan count = %d", cfg.Watch.ScanCount)
+	}
+	if cfg.Watch.FailedRetryInterval != 5*time.Minute {
+		t.Fatalf("failed retry interval = %s", cfg.Watch.FailedRetryInterval)
+	}
+	if cfg.Watch.MaxExportAttempts != 9 {
+		t.Fatalf("max export attempts = %d", cfg.Watch.MaxExportAttempts)
 	}
 	if cfg.Watch.DeleteAfterExport {
 		t.Fatal("delete_after_export should be false")

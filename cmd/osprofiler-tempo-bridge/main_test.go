@@ -9,6 +9,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"testing"
+	"time"
 
 	collectortrace "go.opentelemetry.io/proto/otlp/collector/trace/v1"
 	commonpb "go.opentelemetry.io/proto/otlp/common/v1"
@@ -298,6 +299,92 @@ watch:
 	}
 	if state["scan_cursor"] != "9" {
 		t.Fatalf("scan_cursor = %#v, want 9", state["scan_cursor"])
+	}
+}
+
+func TestRunWatchOnceSkipsTraceInFailedExportBackoff(t *testing.T) {
+	python, err := exec.LookPath("python3")
+	if err != nil {
+		t.Skip("python3 not available")
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Fatal("otlp server should not receive skipped trace")
+	}))
+	defer server.Close()
+
+	tmp := t.TempDir()
+	helperPath := filepath.Join(tmp, "fake_helper.py")
+	getReportPath := filepath.Join(tmp, "get_report_called")
+	if err := os.WriteFile(helperPath, []byte(`
+import json
+import os
+import sys
+
+for line in sys.stdin:
+    req = json.loads(line)
+    method = req.get("method")
+    if method == "list_traces":
+        print(json.dumps({"id": req["id"], "ok": True, "next_cursor": "0", "traces": [{"base_id": "slow-base", "timestamp": "2026-05-23T12:00:00.000000"}]}), flush=True)
+    elif method == "get_report":
+        with open(os.environ["GET_REPORT_PATH"], "w", encoding="utf-8") as f:
+            f.write(req.get("base_id", ""))
+        print(json.dumps({"id": req["id"], "ok": False, "error": {"code": "unexpected", "message": "get_report should be skipped"}}), flush=True)
+    else:
+        print(json.dumps({"id": req["id"], "ok": False, "error": {"code": "unexpected", "message": method}}), flush=True)
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	t.Setenv("GET_REPORT_PATH", getReportPath)
+	t.Setenv("OSPROFILER_CONNECTION_STRING", "redis://:redacted@example:6379/0")
+	t.Setenv("OTLP_ENDPOINT", server.URL)
+
+	statePath := filepath.Join(tmp, "state.json")
+	nextRetry := time.Now().UTC().Add(30 * time.Minute).Format(time.RFC3339Nano)
+	if err := os.WriteFile(statePath, []byte(`{
+  "exported": {},
+  "failed": {
+    "slow-base": {
+      "attempts": 1,
+      "last_error": "helper get_report timed out",
+      "last_failed_at": "2026-05-23T12:00:00Z",
+      "next_retry_at": "`+nextRetry+`"
+    }
+  }
+}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	configPath := filepath.Join(tmp, "config.yaml")
+	if err := os.WriteFile(configPath, []byte(`
+osprofiler:
+  connection_string: "${OSPROFILER_CONNECTION_STRING}"
+helper:
+  command: ["`+python+`", "`+helperPath+`"]
+otlp:
+  endpoint: "${OTLP_ENDPOINT}"
+watch:
+  export_delay: "0s"
+  state_file: "`+statePath+`"
+  max_traces_per_poll: 10
+  failed_retry_interval: "30m"
+  max_export_attempts: 3
+  delete_after_export: true
+`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+
+	err = run([]string{
+		"watch",
+		"--once",
+		"--config", configPath,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := os.Stat(getReportPath); !os.IsNotExist(err) {
+		t.Fatalf("get_report was called for trace in backoff")
 	}
 }
 
