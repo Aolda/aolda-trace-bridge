@@ -137,7 +137,7 @@ func LoadFile(path string) (Config, error) {
 		},
 	}
 
-	cfg.Helper.RequestTimeout, err = parseDurationOr(raw.Helper.RequestTimeout, 60*time.Second)
+	cfg.Helper.RequestTimeout, err = parseDurationOr(raw.Helper.RequestTimeout, 5*time.Minute)
 	if err != nil {
 		return Config{}, fmt.Errorf("helper.request_timeout: %w", err)
 	}
