@@ -44,7 +44,7 @@ otlp:
 	if !cfg.Bridge.RedactSensitiveKeys {
 		t.Fatal("redact_sensitive_keys should default true")
 	}
-	if cfg.Helper.RequestTimeout != 60*time.Second {
+	if cfg.Helper.RequestTimeout != 5*time.Minute {
 		t.Fatalf("unexpected request timeout: %s", cfg.Helper.RequestTimeout)
 	}
 	if cfg.Watch.PollInterval != 30*time.Second {

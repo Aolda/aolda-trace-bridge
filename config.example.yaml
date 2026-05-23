@@ -5,7 +5,7 @@ helper:
   command:
     - "python3"
     - "/app/helper/osprofiler_helper.py"
-  request_timeout: "60s"
+  request_timeout: "5m"
   startup_timeout: "5s"
 
 otlp:
